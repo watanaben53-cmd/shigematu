@@ -140,37 +140,56 @@ function App(){
   // localStorageへの保存（バックアップ）
   useEffect(()=>saveData(data),[data]);
 
-  // Firestore同期：データ変更時にアップロード
+  // Firestore同期設計：
+  // ・起動時に1回だけクラウドから読み込む
+  // ・自分の操作でdataが変わったらクラウドに書き込む
+  // ・他端末の変更は起動時にのみ反映（操作中の上書きを防ぐ）
+  const isRemoteUpdate=React.useRef(false);
+  const initialized=React.useRef(false);
+
+  // 起動時：クラウドから1回だけ読み込む
   useEffect(()=>{
+    db.collection("inventory").doc("main").get()
+      .then(doc=>{
+        if(doc.exists){
+          try{
+            const cloudData=JSON.parse(doc.data().data);
+            const cloudUpdated=doc.data().updatedAt||"";
+            const localUpdated=localStorage.getItem("inv_updated")||"";
+            // クラウドが新しい場合だけ反映
+            if(cloudUpdated>localUpdated){
+              isRemoteUpdate.current=true;
+              setData(d=>({boms:[],sales:[],subCategories:{...DSUBS},staff:[],trash:[],...cloudData}));
+              localStorage.setItem("inv_updated",cloudUpdated);
+            }
+          }catch(e){console.log("Firestore load error:",e);}
+        }
+        initialized.current=true;
+      })
+      .catch(e=>{
+        console.log("Firestore get error:",e);
+        initialized.current=true;
+      });
+  },[]);
+
+  // データ変更時：クラウドに保存（リモート更新による変更は除く）
+  useEffect(()=>{
+    if(!initialized.current)return;
+    if(isRemoteUpdate.current){
+      isRemoteUpdate.current=false;
+      return;
+    }
     const timer=setTimeout(()=>{
-      try{
-        db.collection("inventory").doc("main").set({
-          data:JSON.stringify(data),
-          updatedAt:new Date().toISOString()
-        }).catch(e=>console.log("Firestore save error:",e));
-      }catch(e){console.log("Firestore error:",e);}
-    },1500); // 1.5秒待ってからまとめて保存
+      const now=new Date().toISOString();
+      db.collection("inventory").doc("main").set({
+        data:JSON.stringify(data),
+        updatedAt:now
+      }).then(()=>{
+        localStorage.setItem("inv_updated",now);
+      }).catch(e=>console.log("Firestore save error:",e));
+    },800);
     return ()=>clearTimeout(timer);
   },[data]);
-
-  // Firestore同期：起動時にクラウドデータを取得
-  useEffect(()=>{
-    const unsub=db.collection("inventory").doc("main").onSnapshot(doc=>{
-      if(doc.exists){
-        try{
-          const cloudData=JSON.parse(doc.data().data);
-          // クラウドのデータがローカルより新しければ反映
-          const cloudUpdated=doc.data().updatedAt||"";
-          const localUpdated=localStorage.getItem("inv_updated")||"";
-          if(cloudUpdated>localUpdated){
-            setData({boms:[],sales:[],subCategories:{...DSUBS},staff:[],trash:[],...cloudData});
-            localStorage.setItem("inv_updated",cloudUpdated);
-          }
-        }catch(e){console.log("Firestore load error:",e);}
-      }
-    },e=>console.log("Firestore listener error:",e));
-    return ()=>unsub();
-  },[]);
   useEffect(()=>{if(modal&&modal.type==="item"&&nameRef.current)setTimeout(()=>nameRef.current&&nameRef.current.focus(),100);},[modal]);
 
   const subs=useMemo(()=>({...DSUBS,...(data.subCategories||{})}),[data.subCategories]);
