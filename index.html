@@ -137,57 +137,73 @@ function App(){
   const [bomSub,setBomSub]=useState("全て");
   const nameRef=useRef(null);
 
-  // localStorageへの保存（バックアップ）
+  // localStorage保存
   useEffect(()=>saveData(data),[data]);
 
-  // Firestore同期設計：
-  // ・起動時に1回だけクラウドから読み込む
-  // ・自分の操作でdataが変わったらクラウドに書き込む
-  // ・他端末の変更は起動時にのみ反映（操作中の上書きを防ぐ）
-  const isRemoteUpdate=React.useRef(false);
-  const initialized=React.useRef(false);
+  // ===== Firestore同期 =====
+  // 方針：
+  //   起動時 → クラウドから読み込み（1回のみ）
+  //   操作時 → 3秒後にクラウドへ保存
+  //   他端末 → ページリロードで最新を取得
+  //   ※リアルタイム監視はしない（操作の競合を防ぐ）
 
-  // 起動時：クラウドから1回だけ読み込む
+  const isSaving=React.useRef(false);
+  const skipSave=React.useRef(true); // 初回レンダリングは保存しない
+
+  // 起動時：クラウドから読み込み（1回のみ）
   useEffect(()=>{
     db.collection("inventory").doc("main").get()
       .then(doc=>{
         if(doc.exists){
           try{
-            const cloudData=JSON.parse(doc.data().data);
-            const cloudUpdated=doc.data().updatedAt||"";
-            const localUpdated=localStorage.getItem("inv_updated")||"";
-            // クラウドが新しい場合だけ反映
-            if(cloudUpdated>localUpdated){
-              isRemoteUpdate.current=true;
-              setData(d=>({boms:[],sales:[],subCategories:{...DSUBS},staff:[],trash:[],...cloudData}));
-              localStorage.setItem("inv_updated",cloudUpdated);
+            const d=JSON.parse(doc.data().data);
+            // クラウドのupdatedAtとlocalのupdatedAtを比較
+            const cu=doc.data().updatedAt||"";
+            const lu=localStorage.getItem("inv_sync_at")||"";
+            if(cu>lu){
+              // クラウドが新しければ反映（skipSaveをtrueにしてクラウド再保存を防ぐ）
+              skipSave.current=true;
+              setData({boms:[],sales:[],subCategories:{...DSUBS},staff:[],trash:[],...d});
+              localStorage.setItem("inv_sync_at",cu);
+            } else {
+              skipSave.current=false;
             }
-          }catch(e){console.log("Firestore load error:",e);}
+          }catch(e){
+            console.log("load error:",e);
+            skipSave.current=false;
+          }
+        } else {
+          skipSave.current=false;
         }
-        initialized.current=true;
       })
       .catch(e=>{
         console.log("Firestore get error:",e);
-        initialized.current=true;
+        skipSave.current=false;
       });
   },[]);
 
-  // データ変更時：クラウドに保存（リモート更新による変更は除く）
+  // データ変更時：クラウドへ保存
+  // skipSaveがtrueの間は保存しない（起動時のクラウド読み込みによる変更を無視）
   useEffect(()=>{
-    if(!initialized.current)return;
-    if(isRemoteUpdate.current){
-      isRemoteUpdate.current=false;
+    if(skipSave.current){
+      skipSave.current=false;
       return;
     }
+    if(isSaving.current)return;
     const timer=setTimeout(()=>{
+      isSaving.current=true;
       const now=new Date().toISOString();
       db.collection("inventory").doc("main").set({
         data:JSON.stringify(data),
         updatedAt:now
       }).then(()=>{
-        localStorage.setItem("inv_updated",now);
-      }).catch(e=>console.log("Firestore save error:",e));
-    },800);
+        localStorage.setItem("inv_sync_at",now);
+        isSaving.current=false;
+      }).catch(e=>{
+        console.log("save error:",e);
+        isSaving.current=false;
+      });
+    },2000); // 2秒後に保存（連続操作をまとめる）
     return ()=>clearTimeout(timer);
   },[data]);
   useEffect(()=>{if(modal&&modal.type==="item"&&nameRef.current)setTimeout(()=>nameRef.current&&nameRef.current.focus(),100);},[modal]);
