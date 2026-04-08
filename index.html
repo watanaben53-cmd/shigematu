@@ -137,75 +137,59 @@ function App(){
   const [bomSub,setBomSub]=useState("全て");
   const nameRef=useRef(null);
 
-  // localStorage保存
+  // localStorage保存（常時）
   useEffect(()=>saveData(data),[data]);
 
-  // ===== Firestore同期 =====
-  // 方針：
-  //   起動時 → クラウドから読み込み（1回のみ）
-  //   操作時 → 3秒後にクラウドへ保存
-  //   他端末 → ページリロードで最新を取得
-  //   ※リアルタイム監視はしない（操作の競合を防ぐ）
+  // ===== Firestore同期（手動ボタン方式）=====
+  // 自動同期は一切しない。ボタンを押したときのみ通信する。
+  // アップロード：手動ボタン → クラウドへ保存
+  // ダウンロード：手動ボタン → クラウドから読み込み
+  const [syncStatus,setSyncStatus]=useState("idle"); // idle | saving | loading | done | error
 
-  const isSaving=React.useRef(false);
-  const skipSave=React.useRef(true); // 初回レンダリングは保存しない
+  function uploadToCloud(){
+    setSyncStatus("saving");
+    const now=new Date().toISOString();
+    db.collection("inventory").doc("main").set({
+      data:JSON.stringify(data),
+      updatedAt:now
+    }).then(()=>{
+      localStorage.setItem("inv_sync_at",now);
+      setSyncStatus("done");
+      setTimeout(()=>setSyncStatus("idle"),2000);
+    }).catch(e=>{
+      console.log("upload error:",e);
+      setSyncStatus("error");
+      setTimeout(()=>setSyncStatus("idle"),3000);
+    });
+  }
 
-  // 起動時：クラウドから読み込み（1回のみ）
-  useEffect(()=>{
+  function downloadFromCloud(){
+    setSyncStatus("loading");
     db.collection("inventory").doc("main").get()
       .then(doc=>{
         if(doc.exists){
           try{
             const d=JSON.parse(doc.data().data);
-            // クラウドのupdatedAtとlocalのupdatedAtを比較
             const cu=doc.data().updatedAt||"";
-            const lu=localStorage.getItem("inv_sync_at")||"";
-            if(cu>lu){
-              // クラウドが新しければ反映（skipSaveをtrueにしてクラウド再保存を防ぐ）
-              skipSave.current=true;
-              setData({boms:[],sales:[],subCategories:{...DSUBS},staff:[],trash:[],...d});
-              localStorage.setItem("inv_sync_at",cu);
-            } else {
-              skipSave.current=false;
-            }
+            setData({boms:[],sales:[],subCategories:{...DSUBS},staff:[],trash:[],...d});
+            localStorage.setItem("inv_sync_at",cu);
+            setSyncStatus("done");
+            setTimeout(()=>setSyncStatus("idle"),2000);
           }catch(e){
-            console.log("load error:",e);
-            skipSave.current=false;
+            setSyncStatus("error");
+            setTimeout(()=>setSyncStatus("idle"),3000);
           }
         } else {
-          skipSave.current=false;
+          alert("クラウドにデータがありません。先にアップロードしてください。");
+          setSyncStatus("idle");
         }
       })
       .catch(e=>{
-        console.log("Firestore get error:",e);
-        skipSave.current=false;
+        console.log("download error:",e);
+        setSyncStatus("error");
+        setTimeout(()=>setSyncStatus("idle"),3000);
       });
-  },[]);
-
-  // データ変更時：クラウドへ保存
-  // skipSaveがtrueの間は保存しない（起動時のクラウド読み込みによる変更を無視）
-  useEffect(()=>{
-    if(skipSave.current){
-      skipSave.current=false;
-      return;
-    }
-    if(isSaving.current)return;
-    const timer=setTimeout(()=>{
-      isSaving.current=true;
-      const now=new Date().toISOString();
-      db.collection("inventory").doc("main").set({
-        data:JSON.stringify(data),
-        updatedAt:now
-      }).then(()=>{
-        localStorage.setItem("inv_sync_at",now);
-        isSaving.current=false;
-      }).catch(e=>{
-        console.log("save error:",e);
-        isSaving.current=false;
-      });
-    },2000); // 2秒後に保存（連続操作をまとめる）
-    return ()=>clearTimeout(timer);
-  },[data]);
+  }
   useEffect(()=>{if(modal&&modal.type==="item"&&nameRef.current)setTimeout(()=>nameRef.current&&nameRef.current.focus(),100);},[modal]);
 
   const subs=useMemo(()=>({...DSUBS,...(data.subCategories||{})}),[data.subCategories]);
@@ -698,11 +682,17 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
               </button>
             ))}
           </nav>
-          {sidebar&&<div style={{padding:"10px 14px",fontSize:11,color:"#475569",borderTop:"1px solid #334155"}}>
-            <div>全{data.items.length}品目 / {data.items.reduce((s,i)=>s+i.quantity,0)}在庫</div>
-            <div style={{marginTop:4,display:"flex",alignItems:"center",gap:4}}>
-              <span style={{width:7,height:7,borderRadius:"50%",background:"#10b981",display:"inline-block",flexShrink:0}}></span>
-              <span style={{fontSize:10,color:"#10b981"}}>クラウド同期中</span>
+          {sidebar&&<div style={{padding:"10px 14px",borderTop:"1px solid #334155"}}>
+            <div style={{fontSize:11,color:"#475569",marginBottom:8}}>全{data.items.length}品目 / {data.items.reduce((s,i)=>s+i.quantity,0)}在庫</div>
+            <div style={{display:"flex",flexDirection:"column",gap:5}}>
+              <button onClick={uploadToCloud} disabled={syncStatus==="saving"||syncStatus==="loading"}
+                style={{background:syncStatus==="done"?"#10b981":syncStatus==="error"?"#ef4444":"#3b82f6",color:"#fff",border:"none",borderRadius:6,padding:"5px 8px",fontSize:11,fontWeight:700,cursor:"pointer",width:"100%"}}>
+                {syncStatus==="saving"?"保存中...":syncStatus==="done"?"✓ 完了":syncStatus==="error"?"✗ エラー":"☁ クラウドへ保存"}
+              </button>
+              <button onClick={downloadFromCloud} disabled={syncStatus==="saving"||syncStatus==="loading"}
+                style={{background:"#475569",color:"#fff",border:"none",borderRadius:6,padding:"5px 8px",fontSize:11,fontWeight:700,cursor:"pointer",width:"100%"}}>
+                {syncStatus==="loading"?"受信中...":"↓ クラウドから取得"}
+              </button>
             </div>
           </div>}
         </aside>
