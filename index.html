@@ -16,6 +16,15 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="在庫管理"/>
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<!-- PWA -->
+<link rel="manifest" href="manifest.json"/>
+<meta name="theme-color" content="#1e293b"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="在庫管理"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
@@ -81,13 +90,14 @@ const SAMPLE={
   boms:[{id:"b1",productId:"4",parts:[{partId:"1",qty:4},{partId:"2",qty:4},{partId:"3",qty:1}]}],
   sales:[{id:"s1",productId:"4",quantity:1,customer:"株式会社サンプル",date:"2026-03-22",serialNo:"SN-00001",prefecture:"大阪府大阪市",shopName:"大阪販売店",contactPerson:"田中 太郎",note:"初回納品"}],
   staff:[{code:"001",name:"渡部"},{code:"002",name:"田中"}],
-  trash:[]
+  trash:[],
+  orders:[]
 };
 
 function loadData(){
   try{
     const r=localStorage.getItem(SK);
-    if(r){const d=JSON.parse(r);return {boms:[],sales:[],subCategories:{...DSUBS},staff:[],trash:[],...d};}
+    if(r){const d=JSON.parse(r);return {boms:[],sales:[],subCategories:{...DSUBS},staff:[],trash:[],orders:[],...d};}
     return JSON.parse(JSON.stringify(SAMPLE));
   }catch(e){return JSON.parse(JSON.stringify(SAMPLE));}
 }
@@ -129,6 +139,8 @@ function App(){
   const [openSubs,setOpenSubs]=useState({});
   const [editSub,setEditSub]=useState(null);
   const [salePanelOpen,setSalePanelOpen]=useState(true);
+  const [orderPanelOpen,setOrderPanelOpen]=useState(true);
+  const [syncStatus,setSyncStatus]=useState("idle");
   const [invYear,setInvYear]=useState("");
   const [invMonth,setInvMonth]=useState("");
   const [invActual,setInvActual]=useState({});
@@ -137,32 +149,17 @@ function App(){
   const [bomSub,setBomSub]=useState("全て");
   const nameRef=useRef(null);
 
-  // localStorage保存（常時）
+  // localStorageへの保存（バックアップ）
   useEffect(()=>saveData(data),[data]);
 
-  // ===== Firestore同期（手動ボタン方式）=====
-  // 自動同期は一切しない。ボタンを押したときのみ通信する。
-  // アップロード：手動ボタン → クラウドへ保存
-  // ダウンロード：手動ボタン → クラウドから読み込み
-  const [syncStatus,setSyncStatus]=useState("idle"); // idle | saving | loading | done | error
-
+  // ===== Firebase手動同期 =====
   function uploadToCloud(){
     setSyncStatus("saving");
     const now=new Date().toISOString();
-    db.collection("inventory").doc("main").set({
-      data:JSON.stringify(data),
-      updatedAt:now
-    }).then(()=>{
-      localStorage.setItem("inv_sync_at",now);
-      setSyncStatus("done");
-      setTimeout(()=>setSyncStatus("idle"),2000);
-    }).catch(e=>{
-      console.log("upload error:",e);
-      setSyncStatus("error");
-      setTimeout(()=>setSyncStatus("idle"),3000);
-    });
+    db.collection("inventory").doc("main").set({data:JSON.stringify(data),updatedAt:now})
+      .then(()=>{localStorage.setItem("inv_sync_at",now);setSyncStatus("done");setTimeout(()=>setSyncStatus("idle"),2000);})
+      .catch(e=>{console.log("upload error:",e);setSyncStatus("error");setTimeout(()=>setSyncStatus("idle"),3000);});
   }
-
   function downloadFromCloud(){
     setSyncStatus("loading");
     db.collection("inventory").doc("main").get()
@@ -171,25 +168,75 @@ function App(){
           try{
             const d=JSON.parse(doc.data().data);
             const cu=doc.data().updatedAt||"";
-            setData({boms:[],sales:[],subCategories:{...DSUBS},staff:[],trash:[],...d});
+            setData({boms:[],sales:[],subCategories:{...DSUBS},staff:[],trash:[],orders:[],...d});
             localStorage.setItem("inv_sync_at",cu);
-            setSyncStatus("done");
-            setTimeout(()=>setSyncStatus("idle"),2000);
-          }catch(e){
-            setSyncStatus("error");
-            setTimeout(()=>setSyncStatus("idle"),3000);
-          }
-        } else {
-          alert("クラウドにデータがありません。先にアップロードしてください。");
-          setSyncStatus("idle");
-        }
+            setSyncStatus("done");setTimeout(()=>setSyncStatus("idle"),2000);
+          }catch(e){setSyncStatus("error");setTimeout(()=>setSyncStatus("idle"),3000);}
+        }else{alert("クラウドにデータがありません。先にアップロードしてください。");setSyncStatus("idle");}
       })
-      .catch(e=>{
-        console.log("download error:",e);
-        setSyncStatus("error");
-        setTimeout(()=>setSyncStatus("idle"),3000);
-      });
+      .catch(e=>{console.log("download error:",e);setSyncStatus("error");setTimeout(()=>setSyncStatus("idle"),3000);});
   }
+
+  // ===== 受注・製造管理 =====
+  function openNewOrder(){
+    setForm({_ordClient:"",_ordAddr:"",_ordDate:todayStr(),_ordDeadline:"",_ordNote:"",_ordProds:[{model:"",serialNo:"",done:false}]});
+    setModal({type:"order"});
+  }
+  function openEditOrder(ord){
+    setForm({_ordClient:ord.client,_ordAddr:ord.address||"",_ordDate:ord.orderDate,_ordDeadline:ord.deadline||"",_ordNote:ord.note||"",_ordProds:ord.products.map(p=>({...p}))});
+    setModal({type:"order",id:ord.id});
+  }
+  function saveOrder(){
+    if(!(form._ordClient||"").trim()){alert("取引先を入力してください");return;}
+    const prods=(form._ordProds||[]).filter(p=>(p.model||"").trim());
+    if(!prods.length){alert("製品型式を1つ以上入力してください");return;}
+    const base={client:form._ordClient.trim(),address:form._ordAddr||"",orderDate:form._ordDate||todayStr(),deadline:form._ordDeadline||"",note:form._ordNote||"",products:prods};
+    if(modal.id){
+      setData(d=>({...d,orders:(d.orders||[]).map(o=>o.id===modal.id?{...base,id:o.id,createdAt:o.createdAt}:o)}));
+    }else{
+      setData(d=>({...d,orders:[...(d.orders||[]),{...base,id:genId(),createdAt:nowStr()}]}));
+    }
+    setModal(null);
+  }
+  function deleteOrder(id){
+    if(!confirm("この受注を削除しますか？"))return;
+    setData(d=>({...d,orders:(d.orders||[]).filter(o=>o.id!==id)}));
+  }
+  function toggleDone(ordId,pi){
+    setData(d=>({...d,orders:(d.orders||[]).map(o=>o.id!==ordId?o:{...o,products:o.products.map((p,i)=>i===pi?{...p,done:!p.done}:p)})}));
+  }
+
+  // Firestore同期：データ変更時にアップロード
+  useEffect(()=>{
+    const timer=setTimeout(()=>{
+      try{
+        db.collection("inventory").doc("main").set({
+          data:JSON.stringify(data),
+          updatedAt:new Date().toISOString()
+        }).catch(e=>console.log("Firestore save error:",e));
+      }catch(e){console.log("Firestore error:",e);}
+    },1500); // 1.5秒待ってからまとめて保存
+    return ()=>clearTimeout(timer);
+  },[data]);
+
+  // Firestore同期：起動時にクラウドデータを取得
+  useEffect(()=>{
+    const unsub=db.collection("inventory").doc("main").onSnapshot(doc=>{
+      if(doc.exists){
+        try{
+          const cloudData=JSON.parse(doc.data().data);
+          // クラウドのデータがローカルより新しければ反映
+          const cloudUpdated=doc.data().updatedAt||"";
+          const localUpdated=localStorage.getItem("inv_updated")||"";
+          if(cloudUpdated>localUpdated){
+            setData({boms:[],sales:[],subCategories:{...DSUBS},staff:[],trash:[],...cloudData});
+            localStorage.setItem("inv_updated",cloudUpdated);
+          }
+        }catch(e){console.log("Firestore load error:",e);}
+      }
+    },e=>console.log("Firestore listener error:",e));
+    return ()=>unsub();
+  },[]);
   useEffect(()=>{if(modal&&modal.type==="item"&&nameRef.current)setTimeout(()=>nameRef.current&&nameRef.current.focus(),100);},[modal]);
 
   const subs=useMemo(()=>({...DSUBS,...(data.subCategories||{})}),[data.subCategories]);
@@ -634,6 +681,7 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
     {id:"trash",icon:"🗑",label:"削除済み販売記録"},
     {id:"transactions",icon:"↕",label:"入出庫履歴"},
     {id:"staff",icon:"👤",label:"担当者管理"},
+    {id:"orders",icon:"🏭",label:"受注・製造管理"},
     {id:"inv_sheet",icon:"📋",label:"棚卸し表"},
     {id:"settings",icon:"⚙",label:"設定"},
   ];
@@ -687,11 +735,11 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
             <div style={{display:"flex",flexDirection:"column",gap:5}}>
               <button onClick={uploadToCloud} disabled={syncStatus==="saving"||syncStatus==="loading"}
                 style={{background:syncStatus==="done"?"#10b981":syncStatus==="error"?"#ef4444":"#3b82f6",color:"#fff",border:"none",borderRadius:6,padding:"5px 8px",fontSize:11,fontWeight:700,cursor:"pointer",width:"100%"}}>
-                {syncStatus==="saving"?"保存中...":syncStatus==="done"?"✓ 完了":syncStatus==="error"?"✗ エラー":"☁ クラウドへ保存"}
+                {syncStatus==="saving"?"保存中...":syncStatus==="done"?"完了!":syncStatus==="error"?"エラー":"[up] クラウドへ保存"}
               </button>
               <button onClick={downloadFromCloud} disabled={syncStatus==="saving"||syncStatus==="loading"}
                 style={{background:"#475569",color:"#fff",border:"none",borderRadius:6,padding:"5px 8px",fontSize:11,fontWeight:700,cursor:"pointer",width:"100%"}}>
-                {syncStatus==="loading"?"受信中...":"↓ クラウドから取得"}
+                {syncStatus==="loading"?"受信中...":"[down] クラウドから取得"}
               </button>
             </div>
           </div>}
@@ -757,6 +805,42 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                   </table>
                 </div>
               </div>
+
+              {/* 受注・製造状況（折りたたみ）*/}
+              {(()=>{
+                const ords=data.orders||[];
+                if(!ords.length)return null;
+                const assembling=ords.filter(o=>o.products.some(p=>!p.done)).length;
+                const waiting=ords.filter(o=>o.products.length>0&&o.products.every(p=>p.done)).length;
+                return(
+                  <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",marginTop:18,overflow:"hidden"}}>
+                    <div onClick={()=>setOrderPanelOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",cursor:"pointer",userSelect:"none",background:orderPanelOpen?"#f5f3ff":"#fff",borderBottom:orderPanelOpen?"1px solid #e9d5ff":"none"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                        <h2 style={{fontSize:14,fontWeight:700,color:"#6d28d9",margin:0}}>🏭 受注・製造状況</h2>
+                        {assembling>0&&<span style={{background:"#f59e0b",color:"#fff",borderRadius:10,padding:"1px 8px",fontSize:11,fontWeight:700}}>{assembling}件 組み立て中</span>}
+                        {waiting>0&&<span style={{background:"#3b82f6",color:"#fff",borderRadius:10,padding:"1px 8px",fontSize:11,fontWeight:700}}>{waiting}件 出荷待ち</span>}
+                      </div>
+                      <span style={{fontSize:16,color:"#8b5cf6",fontWeight:700}}>{orderPanelOpen?"▲":"▼"}</span>
+                    </div>
+                    {orderPanelOpen&&(
+                      <div style={{padding:"10px 14px",display:"flex",flexDirection:"column",gap:6}}>
+                        {ords.slice(0,5).map(ord=>{
+                          const allDone=ord.products.every(p=>p.done);
+                          return(
+                            <div key={ord.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"#f8fafc",borderRadius:8,border:"1px solid #e2e8f0",flexWrap:"wrap"}}>
+                              <span style={{background:allDone?"#3b82f6":"#f59e0b",color:"#fff",borderRadius:5,padding:"2px 8px",fontSize:11,fontWeight:700,flexShrink:0}}>{allDone?"出荷待ち":"組み立て中"}</span>
+                              <span style={{fontWeight:700,fontSize:13,flex:1}}>{ord.client}</span>
+                              {ord.deadline&&<span style={{fontSize:11,color:"#64748b",whiteSpace:"nowrap"}}>納期：{ord.deadline}</span>}
+                              <span style={{fontSize:11,color:"#94a3b8",whiteSpace:"nowrap"}}>{ord.products.filter(p=>p.done).length}/{ord.products.length}台完了</span>
+                            </div>
+                          );
+                        })}
+                        {ords.length>5&&<div style={{fontSize:12,color:"#94a3b8",textAlign:"center"}}>他{ords.length-5}件は受注・製造管理メニューで確認</div>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
@@ -1073,6 +1157,79 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                     ))}</tbody>
                   </table>
                 )}
+              </div>
+            </div>
+          )}
+
+          {/* 受注・製造管理 */}
+          {view==="orders"&&(
+            <div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
+                <div>
+                  <h1 style={{fontSize:20,fontWeight:800,color:"#0f172a"}}>🏭 受注・製造管理</h1>
+                  <p style={{fontSize:13,color:"#64748b",marginTop:2}}>受注ごとに製品の製造状況を管理します。</p>
+                </div>
+                <button onClick={openNewOrder} style={{background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:14,fontWeight:700,cursor:"pointer"}}>＋ 新規受注を登録</button>
+              </div>
+              {(data.orders||[]).length>0&&(
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:16}}>
+                  {[{label:"受注総数",val:(data.orders||[]).length,unit:"件",col:"#8b5cf6"},{label:"組み立て中",val:(data.orders||[]).filter(o=>o.products.some(p=>!p.done)).length,unit:"件",col:"#f59e0b"},{label:"出荷待ち",val:(data.orders||[]).filter(o=>o.products.length>0&&o.products.every(p=>p.done)).length,unit:"件",col:"#3b82f6"}].map(c=>(
+                    <div key={c.label} style={{background:"#fff",borderRadius:12,padding:"12px 14px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",borderTop:"3px solid "+c.col}}>
+                      <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:4,textTransform:"uppercase",letterSpacing:1}}>{c.label}</div>
+                      <div style={{fontSize:24,fontWeight:800,color:c.col}}>{c.val}<span style={{fontSize:12,fontWeight:400,color:"#94a3b8",marginLeft:3}}>{c.unit}</span></div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(data.orders||[]).length===0&&(
+                <div style={{background:"#fff",borderRadius:12,padding:40,textAlign:"center",color:"#94a3b8",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
+                  <div style={{fontSize:40,marginBottom:12}}>🏭</div>
+                  <div style={{fontSize:15,fontWeight:600,marginBottom:12}}>受注が登録されていません</div>
+                  <button onClick={openNewOrder} style={{background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:700,cursor:"pointer"}}>＋ 新規受注を登録</button>
+                </div>
+              )}
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                {[...(data.orders||[])].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(ord=>{
+                  const allDone=ord.products.every(p=>p.done);
+                  return(
+                    <div key={ord.id} style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",overflow:"hidden",border:"1px solid "+(allDone?"#bfdbfe":"#fde68a")}}>
+                      <div style={{padding:"12px 16px",background:allDone?"#eff6ff":"#fffbeb",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                          <span style={{background:allDone?"#3b82f6":"#f59e0b",color:"#fff",borderRadius:6,padding:"3px 10px",fontSize:12,fontWeight:700}}>{allDone?"出荷待ち":"組み立て中"}</span>
+                          <span style={{fontWeight:800,fontSize:15}}>{ord.client}</span>
+                          {ord.deadline&&<span style={{fontSize:12,color:"#64748b"}}>納期：<strong>{ord.deadline}</strong></span>}
+                        </div>
+                        <div style={{display:"flex",gap:6}}>
+                          {SBtn("✎ 編集",()=>openEditOrder(ord),"#f1f5f9","#475569")}
+                          {SBtn("削除",()=>deleteOrder(ord.id),"#fee2e2","#ef4444")}
+                        </div>
+                      </div>
+                      <div style={{padding:"12px 16px"}}>
+                        <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:10,fontSize:13}}>
+                          <span><span style={{color:"#64748b"}}>受注日：</span>{ord.orderDate}</span>
+                          {ord.address&&<span><span style={{color:"#64748b"}}>納品先：</span>{ord.address}</span>}
+                          {ord.note&&<span><span style={{color:"#64748b"}}>備考：</span>{ord.note}</span>}
+                        </div>
+                        <div style={{fontSize:12,fontWeight:700,color:"#475569",marginBottom:6}}>製品一覧（{ord.products.filter(p=>p.done).length}/{ord.products.length}台完了）</div>
+                        <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                          {ord.products.map((p,pi)=>(
+                            <div key={pi} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",borderRadius:8,background:p.done?"#f0fdf4":"#fafafa",border:"1px solid "+(p.done?"#bbf7d0":"#e2e8f0")}}>
+                              <button onClick={()=>toggleDone(ord.id,pi)}
+                                style={{width:24,height:24,borderRadius:5,border:"2px solid "+(p.done?"#10b981":"#cbd5e1"),background:p.done?"#10b981":"#fff",color:"#fff",cursor:"pointer",fontWeight:800,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                                {p.done?"✓":""}
+                              </button>
+                              <div style={{flex:1}}>
+                                <span style={{fontWeight:700,color:p.done?"#065f46":"#1e293b"}}>{p.model}</span>
+                                {p.serialNo&&<span style={{fontSize:11,color:"#64748b",marginLeft:8,fontFamily:"monospace"}}>No.{p.serialNo}</span>}
+                              </div>
+                              <span style={{fontSize:11,fontWeight:700,color:p.done?"#10b981":"#f59e0b",flexShrink:0,whiteSpace:"nowrap"}}>{p.done?"✓ 完了":"⚙ 組み立て中"}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -1579,6 +1736,74 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
               </>
             )}
 
+            {/* 受注・製造登録 */}
+            {modal.type==="order"&&(
+              <>
+                <h2 style={{fontSize:17,fontWeight:800,marginBottom:14}}>{modal.id?"受注を編集":"新規受注を登録"}</h2>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:11,marginBottom:14}}>
+                  <div style={{gridColumn:"1/-1"}}>
+                    {lbl("取引先（必須）")}
+                    <input value={form._ordClient||""} onChange={e=>setForm(p=>({...p,_ordClient:e.target.value}))} placeholder="例：株式会社〇〇"
+                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
+                  </div>
+                  <div style={{gridColumn:"1/-1"}}>
+                    {lbl("納品先住所")}
+                    <input value={form._ordAddr||""} onChange={e=>setForm(p=>({...p,_ordAddr:e.target.value}))} placeholder="例：大阪府大阪市〇〇"
+                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
+                  </div>
+                  <div>
+                    {lbl("受注日")}
+                    <input type="date" value={form._ordDate||todayStr()} onChange={e=>setForm(p=>({...p,_ordDate:e.target.value}))}
+                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
+                  </div>
+                  <div>
+                    {lbl("納期")}
+                    <input type="date" value={form._ordDeadline||""} onChange={e=>setForm(p=>({...p,_ordDeadline:e.target.value}))}
+                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
+                  </div>
+                  <div style={{gridColumn:"1/-1"}}>
+                    {lbl("備考")}
+                    <input value={form._ordNote||""} onChange={e=>setForm(p=>({...p,_ordNote:e.target.value}))} placeholder="備考・メモ"
+                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
+                  </div>
+                </div>
+                <div style={{marginBottom:12}}>
+                  <div style={{fontSize:12,fontWeight:700,color:"#475569",marginBottom:8}}>製品明細（複数入力可）</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:7,maxHeight:260,overflowY:"auto"}}>
+                    {(form._ordProds||[{model:"",serialNo:"",done:false}]).map((p,pi)=>(
+                      <div key={pi} style={{display:"flex",gap:7,alignItems:"flex-end",padding:"8px 10px",background:p.done?"#f0fdf4":"#f8fafc",borderRadius:8,border:"1px solid "+(p.done?"#bbf7d0":"#e2e8f0")}}>
+                        <div style={{flex:2}}>
+                          <div style={{fontSize:10,color:"#64748b",marginBottom:2}}>製品型式</div>
+                          <input value={p.model||""} onChange={e=>setForm(f=>({...f,_ordProds:f._ordProds.map((pp,i)=>i===pi?{...pp,model:e.target.value}:pp)}))}
+                            placeholder="例：MODEL-A" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:6,padding:"5px 8px",fontSize:12,outline:"none"}}/>
+                        </div>
+                        <div style={{flex:2}}>
+                          <div style={{fontSize:10,color:"#64748b",marginBottom:2}}>製造番号</div>
+                          <input value={p.serialNo||""} onChange={e=>setForm(f=>({...f,_ordProds:f._ordProds.map((pp,i)=>i===pi?{...pp,serialNo:e.target.value}:pp)}))}
+                            placeholder="例：SN-001" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:6,padding:"5px 8px",fontSize:12,outline:"none",fontFamily:"monospace"}}/>
+                        </div>
+                        <div style={{flexShrink:0,textAlign:"center"}}>
+                          <div style={{fontSize:10,color:"#64748b",marginBottom:2}}>製造完了</div>
+                          <button onClick={()=>setForm(f=>({...f,_ordProds:f._ordProds.map((pp,i)=>i===pi?{...pp,done:!pp.done}:pp)}))}
+                            style={{width:38,height:30,borderRadius:6,border:"2px solid "+(p.done?"#10b981":"#cbd5e1"),background:p.done?"#10b981":"#fff",color:"#fff",cursor:"pointer",fontWeight:800,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                            {p.done?"✓":""}
+                          </button>
+                        </div>
+                        <button onClick={()=>setForm(f=>({...f,_ordProds:f._ordProds.filter((_,i)=>i!==pi)}))}
+                          style={{background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:6,padding:"6px 9px",cursor:"pointer",fontWeight:700,fontSize:13,flexShrink:0}}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={()=>setForm(f=>({...f,_ordProds:[...(f._ordProds||[]),{model:"",serialNo:"",done:false}]}))}
+                    style={{background:"#f1f5f9",color:"#334155",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8,width:"100%"}}>＋ 製品を追加</button>
+                </div>
+                <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                  <button onClick={()=>setModal(null)} style={{border:"1px solid #e2e8f0",background:"#fff",borderRadius:8,padding:"7px 15px",fontSize:13,cursor:"pointer"}}>キャンセル</button>
+                  <button onClick={saveOrder} style={{background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,padding:"7px 15px",fontSize:13,fontWeight:700,cursor:"pointer"}}>保存</button>
+                </div>
+              </>
+            )}
+
             {/* エクスポート */}
             {modal.type==="export"&&(
               <>
@@ -1615,20 +1840,9 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 <script>
-// 古いService Workerを全て削除してキャッシュをクリア
 if('serviceWorker' in navigator){
-  navigator.serviceWorker.getRegistrations().then(regs=>{
-    regs.forEach(reg=>{
-      reg.unregister();
-      console.log('SW unregistered');
-    });
-  });
-  caches.keys().then(names=>{
-    names.forEach(name=>{
-      caches.delete(name);
-      console.log('Cache deleted:',name);
-    });
-  });
+  navigator.serviceWorker.getRegistrations().then(regs=>{regs.forEach(r=>r.unregister());});
+  caches.keys().then(names=>{names.forEach(n=>caches.delete(n));});
 }
 </script>
 </body>
