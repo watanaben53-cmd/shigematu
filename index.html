@@ -16,10 +16,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes"/>
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
 <meta name="apple-mobile-web-app-title" content="在庫管理"/>
-<!-- Firebase SDK -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-<!-- PWA -->
 <link rel="manifest" href="manifest.json"/>
 <meta name="theme-color" content="#1e293b"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
@@ -52,26 +50,18 @@ input,select,textarea,button{font-family:inherit;}
 <body>
 <div id="root"></div>
 <script>
-// Firebase設定をlocalStorageから動的に読み込み
-let db = null;
-(function(){
-  try{
-    const saved = localStorage.getItem("fb_config");
-    if(saved){
-      const cfg = JSON.parse(saved);
-      if(cfg.apiKey && cfg.projectId){
-        firebase.initializeApp(cfg);
-        db = firebase.firestore();
-        console.log("Firebase initialized OK");
-      }
-    }
-  }catch(e){console.log("Firebase init error:", e);}
-})();
-// 古いService Workerを削除
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.getRegistrations().then(r=>r.forEach(s=>s.unregister()));
-  caches.keys().then(n=>n.forEach(k=>caches.delete(k)));
-}
+// Firebase設定
+const firebaseConfig = {
+  apiKey: "AIzaSyB7kKTCI9e1w2wpKg9TMJp3fKqnYEUiKHA",
+  authDomain: "shigematu-kanri.firebaseapp.com",
+  projectId: "shigematu-kanri",
+  storageBucket: "shigematu-kanri.firebasestorage.app",
+  messagingSenderId: "928986828773",
+  appId: "1:928986828773:web:4fa29264d7adaaebe9690c"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
 const _cw=console.warn;
 console.warn=function(){if(arguments[0]&&String(arguments[0]).indexOf('Babel')>=0)return;_cw.apply(console,arguments);};
 </script>
@@ -164,13 +154,12 @@ function App(){
   // ===== Firestoreリアルタイム同期 =====
   const isSyncing=React.useRef(false);
   const isRemote=React.useRef(false);
+  const isInit=React.useRef(true);
 
-  // 起動時：リアルタイムリスナー登録（Firebase未設定時はスキップ）
   useEffect(()=>{
-    if(!db)return; // Firebase未設定
-    const unsub=db.collection("inventory").doc("main").onSnapshot(doc=>{
-      if(!doc.exists)return;
-      if(isSyncing.current)return;
+    if(!window.db)return;
+    const unsub=window.db.collection("inventory").doc("main").onSnapshot(doc=>{
+      if(!doc.exists||isSyncing.current)return;
       try{
         const d=JSON.parse(doc.data().data);
         const remoteAt=doc.data().updatedAt||"";
@@ -182,58 +171,30 @@ function App(){
           setSyncStatus("recv");
           setTimeout(()=>setSyncStatus("idle"),2000);
         }
-      }catch(e){console.log("sync error:",e);}
-    },e=>console.log("listener error:",e));
+      }catch(e){console.log("sync recv error:",e);}
+    },e=>console.log("snapshot error:",e));
     return ()=>unsub();
   },[]);
 
-  // データ変更時：クラウドへ保存（Firebase未設定時はスキップ）
   useEffect(()=>{
-    if(!db)return; // Firebase未設定
+    if(isInit.current){isInit.current=false;return;}
+    if(!window.db)return;
     if(isRemote.current){isRemote.current=false;return;}
     const timer=setTimeout(()=>{
+      if(!window.db)return;
       isSyncing.current=true;
       const now=new Date().toISOString();
-      db.collection("inventory").doc("main").set({data:JSON.stringify(data),updatedAt:now})
+      window.db.collection("inventory").doc("main").set({data:JSON.stringify(data),updatedAt:now})
         .then(()=>{
           localStorage.setItem("inv_sync_at",now);
           isSyncing.current=false;
           setSyncStatus("saved");
           setTimeout(()=>setSyncStatus("idle"),1500);
         })
-        .catch(e=>{console.log("save error:",e);isSyncing.current=false;setSyncStatus("error");setTimeout(()=>setSyncStatus("idle"),3000);});
+        .catch(e=>{console.log("sync save error:",e);isSyncing.current=false;setSyncStatus("error");setTimeout(()=>setSyncStatus("idle"),3000);});
     },1000);
     return ()=>clearTimeout(timer);
   },[data]);
-
-  // ===== 受注・製造管理 =====
-  function openNewOrder(){
-    setForm({_ordClient:"",_ordAddr:"",_ordDate:todayStr(),_ordDeadline:"",_ordNote:"",_ordProds:[{model:"",serialNo:"",done:false}]});
-    setModal({type:"order"});
-  }
-  function openEditOrder(ord){
-    setForm({_ordClient:ord.client,_ordAddr:ord.address||"",_ordDate:ord.orderDate,_ordDeadline:ord.deadline||"",_ordNote:ord.note||"",_ordProds:ord.products.map(p=>({...p}))});
-    setModal({type:"order",id:ord.id});
-  }
-  function saveOrder(){
-    if(!(form._ordClient||"").trim()){alert("取引先を入力してください");return;}
-    const prods=(form._ordProds||[]).filter(p=>(p.model||"").trim());
-    if(!prods.length){alert("製品型式を1つ以上入力してください");return;}
-    const base={client:form._ordClient.trim(),address:form._ordAddr||"",orderDate:form._ordDate||todayStr(),deadline:form._ordDeadline||"",note:form._ordNote||"",products:prods};
-    if(modal.id){
-      setData(d=>({...d,orders:(d.orders||[]).map(o=>o.id===modal.id?{...base,id:o.id,createdAt:o.createdAt}:o)}));
-    }else{
-      setData(d=>({...d,orders:[...(d.orders||[]),{...base,id:genId(),createdAt:nowStr()}]}));
-    }
-    setModal(null);
-  }
-  function deleteOrder(id){
-    if(!confirm("この受注を削除しますか？"))return;
-    setData(d=>({...d,orders:(d.orders||[]).filter(o=>o.id!==id)}));
-  }
-  function toggleDone(ordId,pi){
-    setData(d=>({...d,orders:(d.orders||[]).map(o=>o.id!==ordId?o:{...o,products:o.products.map((p,i)=>i===pi?{...p,done:!p.done}:p)})}));
-  }
 
   // Firestore同期：データ変更時にアップロード
   useEffect(()=>{
@@ -432,54 +393,6 @@ function App(){
       const transactions=d.transactions.filter(tx=>tx.saleId!==tid);
       return{...d,items,transactions,trash:(d.trash||[]).filter(t=>t.id!==tid)};
     });
-  }
-
-  // ===== 取引先管理 =====
-  function addClient(){
-    const code=(form._cCode||"").trim();
-    const name=(form._cName||"").trim();
-    if(!code||!name){alert("登録コードと取引先名を入力してください");return;}
-    if((data.clients||[]).some(c=>c.code===code)){alert("このコードは既に使用されています");return;}
-    const nc={code,name,zip:form._cZip||"",address:form._cAddr||"",tel:form._cTel||"",category:form._cCat||"",note:form._cNote||""};
-    setData(d=>({...d,clients:[...(d.clients||[]),nc]}));
-    setForm(p=>({...p,_cCode:"",_cName:"",_cZip:"",_cAddr:"",_cTel:"",_cCat:"",_cNote:""}));
-  }
-  function openEditClient(c){
-    setForm({_cCode:c.code,_cName:c.name,_cZip:c.zip||"",_cAddr:c.address||"",_cTel:c.tel||"",_cCat:c.category||"",_cNote:c.note||""});
-    setModal({type:"editClient",id:c.code});
-  }
-  function saveEditClient(){
-    const name=(form._cName||"").trim();
-    if(!name){alert("取引先名を入力してください");return;}
-    setData(d=>({...d,clients:(d.clients||[]).map(c=>c.code===modal.id?{...c,name,zip:form._cZip||"",address:form._cAddr||"",tel:form._cTel||"",category:form._cCat||"",note:form._cNote||""}:c)}));
-    setModal(null);
-  }
-  function deleteClient(code){
-    if(!confirm("この取引先を削除しますか？"))return;
-    setData(d=>({...d,clients:(d.clients||[]).filter(c=>c.code!==code)}));
-  }
-  function importClientCSV(text){
-    try{
-      const lines=text.split(/\r?\n/).filter(l=>l.trim());
-      const imported=[];
-      const existing=new Set((data.clients||[]).map(c=>c.code));
-      let skip=0;
-      lines.forEach((line,idx)=>{
-        if(idx===0&&(line.includes("登録コード")||line.includes("code")))return; // ヘッダー行スキップ
-        const cols=line.split(",").map(v=>v.replace(/^"|"$/g,"").trim());
-        if(cols.length<2||!cols[0])return;
-        if(existing.has(cols[0])){skip++;return;}
-        imported.push({code:cols[0],name:cols[1]||"",zip:cols[2]||"",address:cols[3]||"",tel:cols[4]||"",category:cols[5]||"",note:cols[6]||""});
-        existing.add(cols[0]);
-      });
-      if(!imported.length){alert("インポートできるデータがありませんでした。\n（重複コード: "+skip+"件）");return;}
-      setData(d=>({...d,clients:[...(d.clients||[]),...imported]}));
-      alert(imported.length+"件インポートしました。"+(skip>0?"（重複スキップ: "+skip+"件）":""));
-      setModal(null);
-    }catch(e){alert("CSVの読み込みに失敗しました。形式を確認してください。");}
-  }
-  function selectClient(c){
-    setForm(p=>({...p,customer:c.name,saleAddress:c.address||"",saleTel:c.tel||"",_selectedClient:c.code}));
   }
 
   // ===== BOM =====
@@ -723,6 +636,57 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
     w.document.close();
   }
 
+  // ===== 受注・製造管理 =====
+  function openNewOrder(){setForm({_oc:"",_oa:"",_od:todayStr(),_odl:"",_on:"",_ops:[{model:"",serialNo:"",done:false}]});setModal({type:"order"});}
+  function openEditOrder(ord){setForm({_oc:ord.client,_oa:ord.address||"",_od:ord.orderDate,_odl:ord.deadline||"",_on:ord.note||"",_ops:ord.products.map(p=>({...p}))});setModal({type:"order",id:ord.id});}
+  function saveOrder(){
+    if(!(form._oc||"").trim()){alert("取引先を入力してください");return;}
+    const prods=(form._ops||[]).filter(p=>(p.model||"").trim());
+    if(!prods.length){alert("製品型式を1つ以上入力してください");return;}
+    const base={client:form._oc.trim(),address:form._oa||"",orderDate:form._od||todayStr(),deadline:form._odl||"",note:form._on||"",products:prods};
+    if(modal.id){setData(d=>({...d,orders:(d.orders||[]).map(o=>o.id===modal.id?{...base,id:o.id,createdAt:o.createdAt}:o)}));}
+    else{setData(d=>({...d,orders:[...(d.orders||[]),{...base,id:genId(),createdAt:nowStr()}]}));}
+    setModal(null);
+  }
+  function deleteOrder(id){if(!confirm("この受注を削除しますか？"))return;setData(d=>({...d,orders:(d.orders||[]).filter(o=>o.id!==id)}));}
+  function toggleDone(ordId,pi){setData(d=>({...d,orders:(d.orders||[]).map(o=>o.id!==ordId?o:{...o,products:o.products.map((p,i)=>i===pi?{...p,done:!p.done}:p)})}));}
+
+  // ===== 取引先管理 =====
+  function addClient(){
+    const code=(form._cc||"").trim(),name=(form._cn||"").trim();
+    if(!code||!name){alert("登録コードと取引先名を入力してください");return;}
+    if((data.clients||[]).some(c=>c.code===code)){alert("このコードは既に使用されています");return;}
+    setData(d=>({...d,clients:[...(d.clients||[]),{code,name,zip:form._cz||"",address:form._ca||"",tel:form._ct||"",category:form._ccat||"",note:form._cnote||""}]}));
+    setForm(p=>({...p,_cc:"",_cn:"",_cz:"",_ca:"",_ct:"",_ccat:"",_cnote:""}));
+  }
+  function deleteClient(code){if(!confirm("削除しますか？"))return;setData(d=>({...d,clients:(d.clients||[]).filter(c=>c.code!==code)}));}
+  function openEditClient(c){setForm({_cc:c.code,_cn:c.name,_cz:c.zip||"",_ca:c.address||"",_ct:c.tel||"",_ccat:c.category||"",_cnote:c.note||""});setModal({type:"editClient",id:c.code});}
+  function saveEditClient(){
+    const name=(form._cn||"").trim();
+    if(!name){alert("取引先名を入力してください");return;}
+    setData(d=>({...d,clients:(d.clients||[]).map(c=>c.code===modal.id?{...c,name,zip:form._cz||"",address:form._ca||"",tel:form._ct||"",category:form._ccat||"",note:form._cnote||""}:c)}));
+    setModal(null);
+  }
+  function importClientCSV(text){
+    try{
+      const rows=text.split("\n").filter(l=>l.trim());
+      const imported=[];const existing=new Set((data.clients||[]).map(c=>c.code));let skip=0;
+      rows.forEach((line,idx)=>{
+        if(idx===0&&(line.includes("登録コード")||line.toLowerCase().includes("code")))return;
+        const cols=line.split(",").map(v=>v.replace(/^"|"$/g,"").trim());
+        if(cols.length<2||!cols[0])return;
+        if(existing.has(cols[0])){skip++;return;}
+        imported.push({code:cols[0],name:cols[1]||"",zip:cols[2]||"",address:cols[3]||"",tel:cols[4]||"",category:cols[5]||"",note:cols[6]||""});
+        existing.add(cols[0]);
+      });
+      if(!imported.length){alert("インポートできるデータがありませんでした。重複スキップ: "+skip+"件");return;}
+      setData(d=>({...d,clients:[...(d.clients||[]),...imported]}));
+      alert(imported.length+"件インポートしました"+(skip>0?"（重複スキップ: "+skip+"件）":""));
+      setModal(null);
+    }catch(e){alert("CSVの読み込みに失敗しました");}
+  }
+  function selectClient(c){setForm(p=>({...p,customer:c.name,prefecture:c.address||""}));}
+
   function exportCSV(){
     const hdr=["日付","製品名","数量","単位","商品コード","顧客名","都道府県・市町村","販売店名","取引先担当者","備考"];
     const rows=recentSales.map(s=>[s.date,iName(s.productId),s.quantity,iUnit(s.productId),s.serialNo||"",s.customer,s.prefecture||"",s.shopName||"",s.contactPerson||"",s.note||""]);
@@ -757,9 +721,9 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
     {id:"sales",icon:"💴",label:"販売記録"},
     {id:"trash",icon:"🗑",label:"削除済み販売記録"},
     {id:"transactions",icon:"↕",label:"入出庫履歴"},
-    {id:"clients",icon:"🏢",label:"取引先管理"},
     {id:"staff",icon:"👤",label:"担当者管理"},
     {id:"orders",icon:"🏭",label:"受注・製造管理"},
+    {id:"clients",icon:"🏢",label:"取引先管理"},
     {id:"inv_sheet",icon:"📋",label:"棚卸し表"},
     {id:"settings",icon:"⚙",label:"設定"},
   ];
@@ -808,13 +772,11 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
               </button>
             ))}
           </nav>
-          {sidebar&&<div style={{padding:"10px 14px",borderTop:"1px solid #334155"}}>
-            <div style={{fontSize:11,color:"#475569",marginBottom:6}}>全{data.items.length}品目 / {data.items.reduce((s,i)=>s+i.quantity,0)}在庫</div>
-            <div style={{display:"flex",alignItems:"center",gap:5,padding:"4px 8px",borderRadius:6,background:syncStatus==="saved"?"rgba(16,185,129,0.2)":syncStatus==="recv"?"rgba(59,130,246,0.2)":syncStatus==="error"?"rgba(239,68,68,0.2)":"transparent"}}>
-              <span style={{width:7,height:7,borderRadius:"50%",background:syncStatus==="saved"?"#10b981":syncStatus==="recv"?"#3b82f6":syncStatus==="error"?"#ef4444":"#94a3b8",display:"inline-block",flexShrink:0,animation:syncStatus==="idle"?"none":"pulse 1s infinite"}}></span>
-              <span style={{fontSize:10,color:syncStatus==="saved"?"#10b981":syncStatus==="recv"?"#3b82f6":syncStatus==="error"?"#ef4444":"#94a3b8",fontWeight:600}}>
-                {!db?"Firebase未設定（設定から接続）":syncStatus==="saved"?"✓ 保存完了":syncStatus==="recv"?"↓ 受信":syncStatus==="error"?"✗ エラー":"同期中"}
-              </span>
+          {sidebar&&<div style={{padding:"10px 14px",fontSize:11,color:"#475569",borderTop:"1px solid #334155"}}>
+            <div>全{data.items.length}品目 / {data.items.reduce((s,i)=>s+i.quantity,0)}在庫</div>
+            <div style={{marginTop:4,display:"flex",alignItems:"center",gap:4}}>
+              <span style={{width:7,height:7,borderRadius:"50%",background:"#10b981",display:"inline-block",flexShrink:0}}></span>
+              <span style={{fontSize:10,color:"#10b981"}}>クラウド同期中</span>
             </div>
           </div>}
         </aside>
@@ -884,17 +846,17 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
               {(()=>{
                 const ords=data.orders||[];
                 if(!ords.length)return null;
-                const assembling=ords.filter(o=>o.products.some(p=>!p.done)).length;
-                const waiting=ords.filter(o=>o.products.length>0&&o.products.every(p=>p.done)).length;
+                const asmb=ords.filter(o=>o.products.some(p=>!p.done)).length;
+                const wait=ords.filter(o=>o.products.length>0&&o.products.every(p=>p.done)).length;
                 return(
-                  <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",marginTop:18,overflow:"hidden"}}>
+                  <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",marginTop:16,overflow:"hidden"}}>
                     <div onClick={()=>setOrderPanelOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",cursor:"pointer",userSelect:"none",background:orderPanelOpen?"#f5f3ff":"#fff",borderBottom:orderPanelOpen?"1px solid #e9d5ff":"none"}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                         <h2 style={{fontSize:14,fontWeight:700,color:"#6d28d9",margin:0}}>🏭 受注・製造状況</h2>
-                        {assembling>0&&<span style={{background:"#f59e0b",color:"#fff",borderRadius:10,padding:"1px 8px",fontSize:11,fontWeight:700}}>{assembling}件 組み立て中</span>}
-                        {waiting>0&&<span style={{background:"#3b82f6",color:"#fff",borderRadius:10,padding:"1px 8px",fontSize:11,fontWeight:700}}>{waiting}件 出荷待ち</span>}
+                        {asmb>0&&<span style={{background:"#f59e0b",color:"#fff",borderRadius:10,padding:"1px 8px",fontSize:11,fontWeight:700}}>{asmb}件 組み立て中</span>}
+                        {wait>0&&<span style={{background:"#3b82f6",color:"#fff",borderRadius:10,padding:"1px 8px",fontSize:11,fontWeight:700}}>{wait}件 出荷待ち</span>}
                       </div>
-                      <span style={{fontSize:16,color:"#8b5cf6",fontWeight:700}}>{orderPanelOpen?"▲":"▼"}</span>
+                      <span style={{fontSize:14,color:"#8b5cf6",fontWeight:700}}>{orderPanelOpen?"▲":"▼"}</span>
                     </div>
                     {orderPanelOpen&&(
                       <div style={{padding:"10px 14px",display:"flex",flexDirection:"column",gap:6}}>
@@ -1204,79 +1166,6 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
             </div>
           )}
 
-          {/* 取引先管理 */}
-          {view==="clients"&&(
-            <div>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
-                <div>
-                  <h1 style={{fontSize:20,fontWeight:800,color:"#0f172a"}}>🏢 取引先管理</h1>
-                  <p style={{fontSize:13,color:"#64748b",marginTop:2}}>取引先の登録・編集・削除ができます。販売登録でプルダウン選択できます。</p>
-                </div>
-                <div style={{display:"flex",gap:7}}>
-                  <button onClick={()=>{setForm(p=>({...p,_csvText:""}));setModal({type:"importCSV"});}}
-                    style={{background:"#10b981",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>📂 CSVインポート</button>
-                  <button onClick={()=>{
-                    const hdr="登録コード,取引先名,郵便番号,住所,電話番号,区分1,備考";
-                    const rows=(data.clients||[]).map(c=>[c.code,c.name,c.zip||"",c.address||"",c.tel||"",c.category||"",c.note||""].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(","));
-                    const csv=[hdr,...rows].join("\n");
-                    const blob=new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8"});
-                    const url=URL.createObjectURL(blob);
-                    const a=document.createElement("a");a.href=url;a.download="取引先一覧.csv";a.click();URL.revokeObjectURL(url);
-                  }} style={{background:"#f1f5f9",color:"#334155",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>📊 CSVエクスポート</button>
-                </div>
-              </div>
-
-              {/* 新規登録フォーム */}
-              <div style={{background:"#fff",borderRadius:12,padding:18,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",marginBottom:18}}>
-                <h2 style={{fontSize:14,fontWeight:700,marginBottom:12}}>新規取引先を登録</h2>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:10,marginBottom:12}}>
-                  <div>{lbl("登録コード")}<input value={form._cCode||""} onChange={e=>setForm(p=>({...p,_cCode:e.target.value}))} placeholder="例：C001" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none",fontFamily:"monospace"}}/></div>
-                  <div>{lbl("取引先名")}<input value={form._cName||""} onChange={e=>setForm(p=>({...p,_cName:e.target.value}))} placeholder="例：株式会社〇〇" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
-                  <div>{lbl("郵便番号")}<input value={form._cZip||""} onChange={e=>setForm(p=>({...p,_cZip:e.target.value}))} placeholder="例：123-4567" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
-                  <div>{lbl("住所")}<input value={form._cAddr||""} onChange={e=>setForm(p=>({...p,_cAddr:e.target.value}))} placeholder="例：大阪府大阪市〇〇" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
-                  <div>{lbl("電話番号")}<input value={form._cTel||""} onChange={e=>setForm(p=>({...p,_cTel:e.target.value}))} placeholder="例：06-1234-5678" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
-                  <div>{lbl("区分1")}<input value={form._cCat||""} onChange={e=>setForm(p=>({...p,_cCat:e.target.value}))} placeholder="例：販売店" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
-                  <div>{lbl("備考")}<input value={form._cNote||""} onChange={e=>setForm(p=>({...p,_cNote:e.target.value}))} placeholder="備考" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
-                </div>
-                <button onClick={addClient} style={{background:"#3b82f6",color:"#fff",border:"none",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:700,cursor:"pointer"}}>＋ 登録</button>
-              </div>
-
-              {/* 取引先一覧 */}
-              <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",overflowX:"auto"}}>
-                <div style={{padding:"12px 16px",borderBottom:"1px solid #f1f5f9",display:"flex",alignItems:"center",gap:8}}>
-                  <span style={{fontWeight:700,fontSize:14}}>登録済み取引先</span>
-                  <span style={{fontSize:12,color:"#94a3b8"}}>{(data.clients||[]).length}件</span>
-                </div>
-                {(data.clients||[]).length===0?(
-                  <div style={{padding:28,textAlign:"center",color:"#94a3b8",fontSize:13}}>
-                    取引先が登録されていません。上のフォームから登録するか、CSVインポートしてください。
-                  </div>
-                ):(
-                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:800}}>
-                    <thead style={{background:"#f8fafc"}}><tr>
-                      <TH c="登録コード"/><TH c="取引先名"/><TH c="郵便番号"/><TH c="住所"/><TH c="電話番号"/><TH c="区分1"/><TH c="備考"/><TH c="操作"/>
-                    </tr></thead>
-                    <tbody>{(data.clients||[]).map((c,idx)=>(
-                      <tr key={c.code} style={{borderBottom:"1px solid #f8fafc",background:idx%2===0?"#fff":"#fafafa"}}>
-                        <TD s={{fontFamily:"monospace",fontWeight:700,color:"#3b82f6"}}>{c.code}</TD>
-                        <TD s={{fontWeight:600}}>{c.name}</TD>
-                        <TD s={{color:"#64748b"}}>{c.zip||"—"}</TD>
-                        <TD s={{color:"#64748b",fontSize:12}}>{c.address||"—"}</TD>
-                        <TD s={{color:"#64748b"}}>{c.tel||"—"}</TD>
-                        <TD>{c.category?<span style={{background:"#f1f5f9",borderRadius:4,padding:"1px 7px",fontSize:11}}>{c.category}</span>:"—"}</TD>
-                        <TD s={{color:"#64748b",fontSize:12}}>{c.note||"—"}</TD>
-                        <TD><div style={{display:"flex",gap:4}}>
-                          {SBtn("編集",()=>openEditClient(c),"#f1f5f9","#475569")}
-                          {SBtn("削除",()=>deleteClient(c.code),"#fee2e2","#ef4444")}
-                        </div></TD>
-                      </tr>
-                    ))}</tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* 担当者管理 */}
           {view==="staff"&&(
             <div>
@@ -1304,79 +1193,6 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                     ))}</tbody>
                   </table>
                 )}
-              </div>
-            </div>
-          )}
-
-          {/* 受注・製造管理 */}
-          {view==="orders"&&(
-            <div>
-              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
-                <div>
-                  <h1 style={{fontSize:20,fontWeight:800,color:"#0f172a"}}>🏭 受注・製造管理</h1>
-                  <p style={{fontSize:13,color:"#64748b",marginTop:2}}>受注ごとに製品の製造状況を管理します。</p>
-                </div>
-                <button onClick={openNewOrder} style={{background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:14,fontWeight:700,cursor:"pointer"}}>＋ 新規受注を登録</button>
-              </div>
-              {(data.orders||[]).length>0&&(
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:16}}>
-                  {[{label:"受注総数",val:(data.orders||[]).length,unit:"件",col:"#8b5cf6"},{label:"組み立て中",val:(data.orders||[]).filter(o=>o.products.some(p=>!p.done)).length,unit:"件",col:"#f59e0b"},{label:"出荷待ち",val:(data.orders||[]).filter(o=>o.products.length>0&&o.products.every(p=>p.done)).length,unit:"件",col:"#3b82f6"}].map(c=>(
-                    <div key={c.label} style={{background:"#fff",borderRadius:12,padding:"12px 14px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",borderTop:"3px solid "+c.col}}>
-                      <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:4,textTransform:"uppercase",letterSpacing:1}}>{c.label}</div>
-                      <div style={{fontSize:24,fontWeight:800,color:c.col}}>{c.val}<span style={{fontSize:12,fontWeight:400,color:"#94a3b8",marginLeft:3}}>{c.unit}</span></div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {(data.orders||[]).length===0&&(
-                <div style={{background:"#fff",borderRadius:12,padding:40,textAlign:"center",color:"#94a3b8",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
-                  <div style={{fontSize:40,marginBottom:12}}>🏭</div>
-                  <div style={{fontSize:15,fontWeight:600,marginBottom:12}}>受注が登録されていません</div>
-                  <button onClick={openNewOrder} style={{background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:700,cursor:"pointer"}}>＋ 新規受注を登録</button>
-                </div>
-              )}
-              <div style={{display:"flex",flexDirection:"column",gap:14}}>
-                {[...(data.orders||[])].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(ord=>{
-                  const allDone=ord.products.every(p=>p.done);
-                  return(
-                    <div key={ord.id} style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",overflow:"hidden",border:"1px solid "+(allDone?"#bfdbfe":"#fde68a")}}>
-                      <div style={{padding:"12px 16px",background:allDone?"#eff6ff":"#fffbeb",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
-                        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                          <span style={{background:allDone?"#3b82f6":"#f59e0b",color:"#fff",borderRadius:6,padding:"3px 10px",fontSize:12,fontWeight:700}}>{allDone?"出荷待ち":"組み立て中"}</span>
-                          <span style={{fontWeight:800,fontSize:15}}>{ord.client}</span>
-                          {ord.deadline&&<span style={{fontSize:12,color:"#64748b"}}>納期：<strong>{ord.deadline}</strong></span>}
-                        </div>
-                        <div style={{display:"flex",gap:6}}>
-                          {SBtn("✎ 編集",()=>openEditOrder(ord),"#f1f5f9","#475569")}
-                          {SBtn("削除",()=>deleteOrder(ord.id),"#fee2e2","#ef4444")}
-                        </div>
-                      </div>
-                      <div style={{padding:"12px 16px"}}>
-                        <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:10,fontSize:13}}>
-                          <span><span style={{color:"#64748b"}}>受注日：</span>{ord.orderDate}</span>
-                          {ord.address&&<span><span style={{color:"#64748b"}}>納品先：</span>{ord.address}</span>}
-                          {ord.note&&<span><span style={{color:"#64748b"}}>備考：</span>{ord.note}</span>}
-                        </div>
-                        <div style={{fontSize:12,fontWeight:700,color:"#475569",marginBottom:6}}>製品一覧（{ord.products.filter(p=>p.done).length}/{ord.products.length}台完了）</div>
-                        <div style={{display:"flex",flexDirection:"column",gap:5}}>
-                          {ord.products.map((p,pi)=>(
-                            <div key={pi} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",borderRadius:8,background:p.done?"#f0fdf4":"#fafafa",border:"1px solid "+(p.done?"#bbf7d0":"#e2e8f0")}}>
-                              <button onClick={()=>toggleDone(ord.id,pi)}
-                                style={{width:24,height:24,borderRadius:5,border:"2px solid "+(p.done?"#10b981":"#cbd5e1"),background:p.done?"#10b981":"#fff",color:"#fff",cursor:"pointer",fontWeight:800,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                                {p.done?"✓":""}
-                              </button>
-                              <div style={{flex:1}}>
-                                <span style={{fontWeight:700,color:p.done?"#065f46":"#1e293b"}}>{p.model}</span>
-                                {p.serialNo&&<span style={{fontSize:11,color:"#64748b",marginLeft:8,fontFamily:"monospace"}}>No.{p.serialNo}</span>}
-                              </div>
-                              <span style={{fontSize:11,fontWeight:700,color:p.done?"#10b981":"#f59e0b",flexShrink:0,whiteSpace:"nowrap"}}>{p.done?"✓ 完了":"⚙ 組み立て中"}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
               </div>
             </div>
           )}
@@ -1536,89 +1352,160 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
             </div>
           )}
 
+          {/* 受注・製造管理 */}
+          {view==="orders"&&(
+            <div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
+                <div><h1 style={{fontSize:20,fontWeight:800,color:"#0f172a"}}>🏭 受注・製造管理</h1><p style={{fontSize:13,color:"#64748b",marginTop:2}}>受注ごとに製品の製造状況を管理します。</p></div>
+                <button onClick={openNewOrder} style={{background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,padding:"9px 18px",fontSize:14,fontWeight:700,cursor:"pointer"}}>＋ 新規受注を登録</button>
+              </div>
+              {(data.orders||[]).length>0&&(
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:16}}>
+                  {[{label:"受注総数",val:(data.orders||[]).length,unit:"件",col:"#8b5cf6"},{label:"組み立て中",val:(data.orders||[]).filter(o=>o.products.some(p=>!p.done)).length,unit:"件",col:"#f59e0b"},{label:"出荷待ち",val:(data.orders||[]).filter(o=>o.products.length>0&&o.products.every(p=>p.done)).length,unit:"件",col:"#3b82f6"}].map(c=>(
+                    <div key={c.label} style={{background:"#fff",borderRadius:12,padding:"12px 14px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",borderTop:"3px solid "+c.col}}>
+                      <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:4,textTransform:"uppercase"}}>{c.label}</div>
+                      <div style={{fontSize:22,fontWeight:800,color:c.col}}>{c.val}<span style={{fontSize:12,fontWeight:400,color:"#94a3b8",marginLeft:3}}>{c.unit}</span></div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {(data.orders||[]).length===0&&(
+                <div style={{background:"#fff",borderRadius:12,padding:40,textAlign:"center",color:"#94a3b8",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}>
+                  <div style={{fontSize:40,marginBottom:12}}>🏭</div>
+                  <div style={{fontSize:15,fontWeight:600,marginBottom:12}}>受注が登録されていません</div>
+                  <button onClick={openNewOrder} style={{background:"#8b5cf6",color:"#fff",border:"none",borderRadius:8,padding:"8px 20px",fontSize:13,fontWeight:700,cursor:"pointer"}}>＋ 新規受注を登録</button>
+                </div>
+              )}
+              <div style={{display:"flex",flexDirection:"column",gap:14}}>
+                {[...(data.orders||[])].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(ord=>{
+                  const allDone=ord.products.every(p=>p.done);
+                  return(
+                    <div key={ord.id} style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",overflow:"hidden",border:"1px solid "+(allDone?"#bfdbfe":"#fde68a")}}>
+                      <div style={{padding:"12px 16px",background:allDone?"#eff6ff":"#fffbeb",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                          <span style={{background:allDone?"#3b82f6":"#f59e0b",color:"#fff",borderRadius:6,padding:"3px 10px",fontSize:12,fontWeight:700}}>{allDone?"出荷待ち":"組み立て中"}</span>
+                          <span style={{fontWeight:800,fontSize:15}}>{ord.client}</span>
+                          {ord.deadline&&<span style={{fontSize:12,color:"#64748b"}}>納期：<strong>{ord.deadline}</strong></span>}
+                        </div>
+                        <div style={{display:"flex",gap:6}}>
+                          {SBtn("✎ 編集",()=>openEditOrder(ord),"#f1f5f9","#475569")}
+                          {SBtn("削除",()=>deleteOrder(ord.id),"#fee2e2","#ef4444")}
+                        </div>
+                      </div>
+                      <div style={{padding:"12px 16px"}}>
+                        <div style={{display:"flex",gap:14,flexWrap:"wrap",marginBottom:10,fontSize:13}}>
+                          <span><span style={{color:"#64748b"}}>受注日：</span>{ord.orderDate}</span>
+                          {ord.address&&<span><span style={{color:"#64748b"}}>納品先：</span>{ord.address}</span>}
+                          {ord.note&&<span><span style={{color:"#64748b"}}>備考：</span>{ord.note}</span>}
+                        </div>
+                        <div style={{fontSize:12,fontWeight:700,color:"#475569",marginBottom:6}}>製品一覧（{ord.products.filter(p=>p.done).length}/{ord.products.length}台完了）</div>
+                        <div style={{display:"flex",flexDirection:"column",gap:5}}>
+                          {ord.products.map((p,pi)=>(
+                            <div key={pi} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",borderRadius:8,background:p.done?"#f0fdf4":"#fafafa",border:"1px solid "+(p.done?"#bbf7d0":"#e2e8f0")}}>
+                              <button onClick={()=>toggleDone(ord.id,pi)} style={{width:24,height:24,borderRadius:5,border:"2px solid "+(p.done?"#10b981":"#cbd5e1"),background:p.done?"#10b981":"#fff",color:"#fff",cursor:"pointer",fontWeight:800,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{p.done?"✓":""}</button>
+                              <div style={{flex:1}}><span style={{fontWeight:700,color:p.done?"#065f46":"#1e293b"}}>{p.model}</span>{p.serialNo&&<span style={{fontSize:11,color:"#64748b",marginLeft:8,fontFamily:"monospace"}}>No.{p.serialNo}</span>}</div>
+                              <span style={{fontSize:11,fontWeight:700,color:p.done?"#10b981":"#f59e0b",flexShrink:0,whiteSpace:"nowrap"}}>{p.done?"✓ 完了":"⚙ 組み立て中"}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* 取引先管理 */}
+          {view==="clients"&&(
+            <div>
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16,flexWrap:"wrap",gap:8}}>
+                <div><h1 style={{fontSize:20,fontWeight:800,color:"#0f172a"}}>🏢 取引先管理</h1><p style={{fontSize:13,color:"#64748b",marginTop:2}}>取引先の登録・編集・削除。販売登録でプルダウン選択できます。</p></div>
+                <div style={{display:"flex",gap:7}}>
+                  <button onClick={()=>{setForm(p=>({...p,_csvText:""}));setModal({type:"importCSV"});}} style={{background:"#10b981",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>📂 CSVインポート</button>
+                  <button onClick={()=>{
+                    const hdr="登録コード,取引先名,郵便番号,住所,電話番号,区分1,備考";
+                    const rows=(data.clients||[]).map(c=>[c.code,c.name,c.zip||"",c.address||"",c.tel||"",c.category||"",c.note||""].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(","));
+                    const csv=[hdr,...rows].join("\n");
+                    const blob=new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8"});
+                    const url=URL.createObjectURL(blob);
+                    const a=document.createElement("a");a.href=url;a.download="取引先一覧.csv";a.click();URL.revokeObjectURL(url);
+                  }} style={{background:"#f1f5f9",color:"#334155",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>📊 CSVエクスポート</button>
+                </div>
+              </div>
+              <div style={{background:"#fff",borderRadius:12,padding:16,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",marginBottom:16}}>
+                <h2 style={{fontSize:14,fontWeight:700,marginBottom:10}}>新規取引先を登録</h2>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:8,marginBottom:10}}>
+                  <div>{lbl("登録コード")}<input value={form._cc||""} onChange={e=>setForm(p=>({...p,_cc:e.target.value}))} placeholder="例：C001" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none",fontFamily:"monospace"}}/></div>
+                  <div>{lbl("取引先名")}<input value={form._cn||""} onChange={e=>setForm(p=>({...p,_cn:e.target.value}))} placeholder="例：株式会社〇〇" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("郵便番号")}<input value={form._cz||""} onChange={e=>setForm(p=>({...p,_cz:e.target.value}))} placeholder="123-4567" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("電話番号")}<input value={form._ct||""} onChange={e=>setForm(p=>({...p,_ct:e.target.value}))} placeholder="06-1234-5678" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("住所")}<input value={form._ca||""} onChange={e=>setForm(p=>({...p,_ca:e.target.value}))} placeholder="大阪府大阪市〇〇" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("区分1")}<input value={form._ccat||""} onChange={e=>setForm(p=>({...p,_ccat:e.target.value}))} placeholder="例：販売店" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("備考")}<input value={form._cnote||""} onChange={e=>setForm(p=>({...p,_cnote:e.target.value}))} placeholder="備考" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
+                </div>
+                <button onClick={addClient} style={{background:"#3b82f6",color:"#fff",border:"none",borderRadius:8,padding:"7px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>＋ 登録</button>
+              </div>
+              <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",overflowX:"auto"}}>
+                <div style={{padding:"10px 16px",borderBottom:"1px solid #f1f5f9"}}><span style={{fontWeight:700,fontSize:14}}>登録済み取引先</span><span style={{fontSize:12,color:"#94a3b8",marginLeft:8}}>{(data.clients||[]).length}件</span></div>
+                {(data.clients||[]).length===0?<div style={{padding:28,textAlign:"center",color:"#94a3b8",fontSize:13}}>取引先が登録されていません</div>:(
+                  <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:800}}>
+                    <thead style={{background:"#f8fafc"}}><tr><TH c="登録コード"/><TH c="取引先名"/><TH c="郵便番号"/><TH c="住所"/><TH c="電話番号"/><TH c="区分1"/><TH c="備考"/><TH c="操作"/></tr></thead>
+                    <tbody>{(data.clients||[]).map((c,idx)=>(
+                      <tr key={c.code} style={{borderBottom:"1px solid #f8fafc",background:idx%2===0?"#fff":"#fafafa"}}>
+                        <TD s={{fontFamily:"monospace",fontWeight:700,color:"#3b82f6"}}>{c.code}</TD>
+                        <TD s={{fontWeight:600}}>{c.name}</TD>
+                        <TD s={{color:"#64748b"}}>{c.zip||"—"}</TD>
+                        <TD s={{color:"#64748b",fontSize:12}}>{c.address||"—"}</TD>
+                        <TD s={{color:"#64748b"}}>{c.tel||"—"}</TD>
+                        <TD>{c.category?<span style={{background:"#f1f5f9",borderRadius:4,padding:"1px 7px",fontSize:11}}>{c.category}</span>:"—"}</TD>
+                        <TD s={{color:"#64748b",fontSize:12}}>{c.note||"—"}</TD>
+                        <TD><div style={{display:"flex",gap:4}}>{SBtn("編集",()=>openEditClient(c),"#f1f5f9","#475569")}{SBtn("削除",()=>deleteClient(c.code),"#fee2e2","#ef4444")}</div></TD>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* 設定 */}
           {view==="settings"&&(
             <div>
               <h1 style={{fontSize:20,fontWeight:800,marginBottom:16,color:"#0f172a"}}>設定</h1>
               <div style={{background:"#fff",borderRadius:12,padding:20,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",maxWidth:540}}>
-                {/* Firebase設定 */}
-              <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:12,padding:18,marginBottom:20}}>
-                <h2 style={{fontSize:15,fontWeight:700,marginBottom:4,color:"#0369a1"}}>🔥 Firebase リアルタイム同期設定</h2>
-                <p style={{fontSize:12,color:"#0284c7",marginBottom:14}}>Firebase Consoleで取得した設定情報を入力してください。保存後すぐに同期が開始されます。</p>
+                <div style={{background:"#f0f9ff",border:"1px solid #bae6fd",borderRadius:12,padding:16,marginBottom:20}}>
+                <h2 style={{fontSize:14,fontWeight:700,marginBottom:8,color:"#0369a1"}}>🔥 Firebase リアルタイム同期設定</h2>
+                <p style={{fontSize:12,color:"#0284c7",marginBottom:12}}>Firebase Consoleで確認した設定情報を入力してください。保存後リロードで同期開始します。</p>
                 {(()=>{
-                  const saved = localStorage.getItem("fb_config");
-                  const cfg = saved ? JSON.parse(saved) : {};
+                  let cfg={};try{const s=localStorage.getItem("fb_config");if(s)cfg=JSON.parse(s);}catch(e){}
                   return(
                     <div>
-                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
-                        <div style={{gridColumn:"1/-1"}}>
-                          <label style={{display:"block",fontSize:11,fontWeight:700,color:"#0369a1",marginBottom:3}}>API KEY</label>
-                          <input id="fb_apiKey" defaultValue={cfg.apiKey||""} placeholder="AIzaSy..."
-                            style={{width:"100%",border:"1px solid #bae6fd",borderRadius:8,padding:"7px 11px",fontSize:12,outline:"none",fontFamily:"monospace"}}/>
-                        </div>
-                        <div>
-                          <label style={{display:"block",fontSize:11,fontWeight:700,color:"#0369a1",marginBottom:3}}>Project ID</label>
-                          <input id="fb_projectId" defaultValue={cfg.projectId||""} placeholder="your-project-id"
-                            style={{width:"100%",border:"1px solid #bae6fd",borderRadius:8,padding:"7px 11px",fontSize:12,outline:"none",fontFamily:"monospace"}}/>
-                        </div>
-                        <div>
-                          <label style={{display:"block",fontSize:11,fontWeight:700,color:"#0369a1",marginBottom:3}}>Auth Domain</label>
-                          <input id="fb_authDomain" defaultValue={cfg.authDomain||""} placeholder="xxx.firebaseapp.com"
-                            style={{width:"100%",border:"1px solid #bae6fd",borderRadius:8,padding:"7px 11px",fontSize:12,outline:"none",fontFamily:"monospace"}}/>
-                        </div>
-                        <div>
-                          <label style={{display:"block",fontSize:11,fontWeight:700,color:"#0369a1",marginBottom:3}}>Storage Bucket</label>
-                          <input id="fb_storageBucket" defaultValue={cfg.storageBucket||""} placeholder="xxx.appspot.com"
-                            style={{width:"100%",border:"1px solid #bae6fd",borderRadius:8,padding:"7px 11px",fontSize:12,outline:"none",fontFamily:"monospace"}}/>
-                        </div>
-                        <div>
-                          <label style={{display:"block",fontSize:11,fontWeight:700,color:"#0369a1",marginBottom:3}}>Messaging Sender ID</label>
-                          <input id="fb_messagingSenderId" defaultValue={cfg.messagingSenderId||""} placeholder="123456789"
-                            style={{width:"100%",border:"1px solid #bae6fd",borderRadius:8,padding:"7px 11px",fontSize:12,outline:"none",fontFamily:"monospace"}}/>
-                        </div>
-                        <div>
-                          <label style={{display:"block",fontSize:11,fontWeight:700,color:"#0369a1",marginBottom:3}}>App ID</label>
-                          <input id="fb_appId" defaultValue={cfg.appId||""} placeholder="1:xxx:web:xxx"
-                            style={{width:"100%",border:"1px solid #bae6fd",borderRadius:8,padding:"7px 11px",fontSize:12,outline:"none",fontFamily:"monospace"}}/>
-                        </div>
+                      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+                        <div style={{gridColumn:"1/-1"}}><label style={{display:"block",fontSize:11,fontWeight:700,color:"#0369a1",marginBottom:2}}>API KEY</label><input id="fb_apiKey" defaultValue={cfg.apiKey||""} placeholder="AIzaSy..." style={{width:"100%",border:"1px solid #bae6fd",borderRadius:7,padding:"6px 10px",fontSize:12,outline:"none",fontFamily:"monospace"}}/></div>
+                        <div><label style={{display:"block",fontSize:11,fontWeight:700,color:"#0369a1",marginBottom:2}}>Project ID</label><input id="fb_projectId" defaultValue={cfg.projectId||""} placeholder="your-project-id" style={{width:"100%",border:"1px solid #bae6fd",borderRadius:7,padding:"6px 10px",fontSize:12,outline:"none",fontFamily:"monospace"}}/></div>
+                        <div><label style={{display:"block",fontSize:11,fontWeight:700,color:"#0369a1",marginBottom:2}}>Auth Domain</label><input id="fb_authDomain" defaultValue={cfg.authDomain||""} placeholder="xxx.firebaseapp.com" style={{width:"100%",border:"1px solid #bae6fd",borderRadius:7,padding:"6px 10px",fontSize:12,outline:"none",fontFamily:"monospace"}}/></div>
+                        <div><label style={{display:"block",fontSize:11,fontWeight:700,color:"#0369a1",marginBottom:2}}>Storage Bucket</label><input id="fb_storageBucket" defaultValue={cfg.storageBucket||""} placeholder="xxx.appspot.com" style={{width:"100%",border:"1px solid #bae6fd",borderRadius:7,padding:"6px 10px",fontSize:12,outline:"none",fontFamily:"monospace"}}/></div>
+                        <div><label style={{display:"block",fontSize:11,fontWeight:700,color:"#0369a1",marginBottom:2}}>Messaging Sender ID</label><input id="fb_messagingSenderId" defaultValue={cfg.messagingSenderId||""} placeholder="123456789" style={{width:"100%",border:"1px solid #bae6fd",borderRadius:7,padding:"6px 10px",fontSize:12,outline:"none",fontFamily:"monospace"}}/></div>
+                        <div><label style={{display:"block",fontSize:11,fontWeight:700,color:"#0369a1",marginBottom:2}}>App ID</label><input id="fb_appId" defaultValue={cfg.appId||""} placeholder="1:xxx:web:xxx" style={{width:"100%",border:"1px solid #bae6fd",borderRadius:7,padding:"6px 10px",fontSize:12,outline:"none",fontFamily:"monospace"}}/></div>
                       </div>
-                      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                      <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
                         <button onClick={()=>{
-                          const newCfg={
-                            apiKey:document.getElementById("fb_apiKey").value.trim(),
-                            authDomain:document.getElementById("fb_authDomain").value.trim(),
-                            projectId:document.getElementById("fb_projectId").value.trim(),
-                            storageBucket:document.getElementById("fb_storageBucket").value.trim(),
-                            messagingSenderId:document.getElementById("fb_messagingSenderId").value.trim(),
-                            appId:document.getElementById("fb_appId").value.trim(),
-                          };
-                          if(!newCfg.apiKey||!newCfg.projectId){alert("API KeyとProject IDは必須です");return;}
-                          localStorage.setItem("fb_config",JSON.stringify(newCfg));
+                          const nc={apiKey:document.getElementById("fb_apiKey").value.trim(),authDomain:document.getElementById("fb_authDomain").value.trim(),projectId:document.getElementById("fb_projectId").value.trim(),storageBucket:document.getElementById("fb_storageBucket").value.trim(),messagingSenderId:document.getElementById("fb_messagingSenderId").value.trim(),appId:document.getElementById("fb_appId").value.trim()};
+                          if(!nc.apiKey||!nc.projectId){alert("API KeyとProject IDは必須です");return;}
+                          localStorage.setItem("fb_config",JSON.stringify(nc));
                           alert("設定を保存しました。ページをリロードして同期を開始します。");
                           window.location.reload();
-                        }} style={{background:"#0284c7",color:"#fff",border:"none",borderRadius:8,padding:"8px 18px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-                          💾 保存してリロード
-                        </button>
-                        <button onClick={()=>{
-                          if(!confirm("Firebase設定を削除しますか？同期が停止されます。"))return;
-                          localStorage.removeItem("fb_config");
-                          localStorage.removeItem("inv_sync_at");
-                          alert("設定を削除しました。ページをリロードします。");
-                          window.location.reload();
-                        }} style={{background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:8,padding:"8px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
-                          削除
-                        </button>
-                        {db&&<span style={{fontSize:12,color:"#10b981",fontWeight:700}}>✓ 同期中</span>}
-                        {!db&&<span style={{fontSize:12,color:"#94a3b8"}}>未設定</span>}
+                        }} style={{background:"#0284c7",color:"#fff",border:"none",borderRadius:7,padding:"7px 16px",fontSize:13,fontWeight:700,cursor:"pointer"}}>💾 保存してリロード</button>
+                        <button onClick={()=>{if(!confirm("Firebase設定を削除しますか？"))return;localStorage.removeItem("fb_config");localStorage.removeItem("inv_sync_at");alert("削除しました。リロードします。");window.location.reload();}} style={{background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:7,padding:"7px 12px",fontSize:13,fontWeight:700,cursor:"pointer"}}>削除</button>
+                        {window.db&&<span style={{fontSize:12,color:"#10b981",fontWeight:700}}>✓ 同期中</span>}
+                        {!window.db&&<span style={{fontSize:12,color:"#94a3b8"}}>未設定</span>}
                       </div>
-                      <div style={{marginTop:10,fontSize:11,color:"#0369a1",background:"#e0f2fe",borderRadius:6,padding:"6px 10px"}}>
-                        💡 Firebase Console → プロジェクトの設定 → 全般タブ → アプリ → SDK の設定と構成 から確認できます
-                      </div>
+                      <div style={{marginTop:8,fontSize:11,color:"#0369a1",background:"#e0f2fe",borderRadius:5,padding:"5px 10px"}}>💡 Firebase Console → プロジェクトの設定 → 全般 → アプリ → SDK設定と構成 で確認できます</div>
                     </div>
                   );
                 })()}
               </div>
-
               <h2 style={{fontSize:15,fontWeight:700,marginBottom:4}}>小カテゴリ管理</h2>
                 <p style={{fontSize:12,color:"#64748b",marginBottom:14}}>✎ボタンで名前の編集、✕で削除できます。</p>
                 {TOPS.map(cat=>(
@@ -1793,16 +1680,14 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                 <div style={{color:"#64748b",fontSize:13,marginBottom:14}}>{form._saleName}</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:11,marginBottom:14}}>
                   <div style={{gridColumn:"1/-1"}}>
-                    {lbl("取引先を選択（または直接入力）")}
-                    <div style={{display:"flex",gap:6,marginBottom:6}}>
-                      <select onChange={e=>{const c=(data.clients||[]).find(x=>x.code===e.target.value);if(c)selectClient(c);}}
-                        style={{flex:1,border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 10px",fontSize:13,background:"#fff",cursor:"pointer"}}>
+                    {lbl("取引先選択（またはそのまま入力）")}
+                    {(data.clients||[]).length>0&&(
+                      <select onChange={e=>{const c=(data.clients||[]).find(x=>x.code===e.target.value);if(c)selectClient(c);}} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 10px",fontSize:13,background:"#fff",cursor:"pointer",marginBottom:6}}>
                         <option value="">-- 取引先から選択 --</option>
                         {(data.clients||[]).map(c=><option key={c.code} value={c.code}>{c.name}（{c.code}）</option>)}
                       </select>
-                    </div>
-                    <input value={form.customer||""} onChange={e=>setForm(p=>({...p,customer:e.target.value}))} placeholder="顧客名（直接入力も可）"
-                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
+                    )}
+                    <input value={form.customer||""} onChange={e=>setForm(p=>({...p,customer:e.target.value}))} placeholder="顧客名" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
                   </div>
                   <div>{lbl("販売台数")}{inp("saleQty","number")}</div>
                   <div>{lbl("販売日")}{inp("saleDate","date")}</div>
@@ -1972,66 +1857,30 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
               </>
             )}
 
-            {/* 受注・製造登録 */}
+            {/* 受注登録・編集 */}
             {modal.type==="order"&&(
               <>
-                <h2 style={{fontSize:17,fontWeight:800,marginBottom:14}}>{modal.id?"受注を編集":"新規受注を登録"}</h2>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:11,marginBottom:14}}>
-                  <div style={{gridColumn:"1/-1"}}>
-                    {lbl("取引先（必須）")}
-                    <input value={form._ordClient||""} onChange={e=>setForm(p=>({...p,_ordClient:e.target.value}))} placeholder="例：株式会社〇〇"
-                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
-                  </div>
-                  <div style={{gridColumn:"1/-1"}}>
-                    {lbl("納品先住所")}
-                    <input value={form._ordAddr||""} onChange={e=>setForm(p=>({...p,_ordAddr:e.target.value}))} placeholder="例：大阪府大阪市〇〇"
-                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
-                  </div>
-                  <div>
-                    {lbl("受注日")}
-                    <input type="date" value={form._ordDate||todayStr()} onChange={e=>setForm(p=>({...p,_ordDate:e.target.value}))}
-                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
-                  </div>
-                  <div>
-                    {lbl("納期")}
-                    <input type="date" value={form._ordDeadline||""} onChange={e=>setForm(p=>({...p,_ordDeadline:e.target.value}))}
-                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
-                  </div>
-                  <div style={{gridColumn:"1/-1"}}>
-                    {lbl("備考")}
-                    <input value={form._ordNote||""} onChange={e=>setForm(p=>({...p,_ordNote:e.target.value}))} placeholder="備考・メモ"
-                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
-                  </div>
+                <h2 style={{fontSize:17,fontWeight:800,marginBottom:12}}>{modal.id?"受注を編集":"新規受注を登録"}</h2>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+                  <div style={{gridColumn:"1/-1"}}>{lbl("取引先（必須）")}<input value={form._oc||""} onChange={e=>setForm(p=>({...p,_oc:e.target.value}))} placeholder="例：株式会社〇〇" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
+                  <div style={{gridColumn:"1/-1"}}>{lbl("納品先住所")}<input value={form._oa||""} onChange={e=>setForm(p=>({...p,_oa:e.target.value}))} placeholder="例：大阪府大阪市〇〇" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("受注日")}<input type="date" value={form._od||todayStr()} onChange={e=>setForm(p=>({...p,_od:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("納期")}<input type="date" value={form._odl||""} onChange={e=>setForm(p=>({...p,_odl:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
+                  <div style={{gridColumn:"1/-1"}}>{lbl("備考")}<input value={form._on||""} onChange={e=>setForm(p=>({...p,_on:e.target.value}))} placeholder="備考・メモ" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
                 </div>
                 <div style={{marginBottom:12}}>
                   <div style={{fontSize:12,fontWeight:700,color:"#475569",marginBottom:8}}>製品明細（複数入力可）</div>
-                  <div style={{display:"flex",flexDirection:"column",gap:7,maxHeight:260,overflowY:"auto"}}>
-                    {(form._ordProds||[{model:"",serialNo:"",done:false}]).map((p,pi)=>(
+                  <div style={{display:"flex",flexDirection:"column",gap:7,maxHeight:240,overflowY:"auto"}}>
+                    {(form._ops||[{model:"",serialNo:"",done:false}]).map((p,pi)=>(
                       <div key={pi} style={{display:"flex",gap:7,alignItems:"flex-end",padding:"8px 10px",background:p.done?"#f0fdf4":"#f8fafc",borderRadius:8,border:"1px solid "+(p.done?"#bbf7d0":"#e2e8f0")}}>
-                        <div style={{flex:2}}>
-                          <div style={{fontSize:10,color:"#64748b",marginBottom:2}}>製品型式</div>
-                          <input value={p.model||""} onChange={e=>setForm(f=>({...f,_ordProds:f._ordProds.map((pp,i)=>i===pi?{...pp,model:e.target.value}:pp)}))}
-                            placeholder="例：MODEL-A" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:6,padding:"5px 8px",fontSize:12,outline:"none"}}/>
-                        </div>
-                        <div style={{flex:2}}>
-                          <div style={{fontSize:10,color:"#64748b",marginBottom:2}}>製造番号</div>
-                          <input value={p.serialNo||""} onChange={e=>setForm(f=>({...f,_ordProds:f._ordProds.map((pp,i)=>i===pi?{...pp,serialNo:e.target.value}:pp)}))}
-                            placeholder="例：SN-001" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:6,padding:"5px 8px",fontSize:12,outline:"none",fontFamily:"monospace"}}/>
-                        </div>
-                        <div style={{flexShrink:0,textAlign:"center"}}>
-                          <div style={{fontSize:10,color:"#64748b",marginBottom:2}}>製造完了</div>
-                          <button onClick={()=>setForm(f=>({...f,_ordProds:f._ordProds.map((pp,i)=>i===pi?{...pp,done:!pp.done}:pp)}))}
-                            style={{width:38,height:30,borderRadius:6,border:"2px solid "+(p.done?"#10b981":"#cbd5e1"),background:p.done?"#10b981":"#fff",color:"#fff",cursor:"pointer",fontWeight:800,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                            {p.done?"✓":""}
-                          </button>
-                        </div>
-                        <button onClick={()=>setForm(f=>({...f,_ordProds:f._ordProds.filter((_,i)=>i!==pi)}))}
-                          style={{background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:6,padding:"6px 9px",cursor:"pointer",fontWeight:700,fontSize:13,flexShrink:0}}>✕</button>
+                        <div style={{flex:2}}><div style={{fontSize:10,color:"#64748b",marginBottom:2}}>製品型式</div><input value={p.model||""} onChange={e=>setForm(f=>({...f,_ops:f._ops.map((pp,i)=>i===pi?{...pp,model:e.target.value}:pp)}))} placeholder="例：MODEL-A" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:6,padding:"5px 8px",fontSize:12,outline:"none"}}/></div>
+                        <div style={{flex:2}}><div style={{fontSize:10,color:"#64748b",marginBottom:2}}>製造番号</div><input value={p.serialNo||""} onChange={e=>setForm(f=>({...f,_ops:f._ops.map((pp,i)=>i===pi?{...pp,serialNo:e.target.value}:pp)}))} placeholder="例：SN-001" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:6,padding:"5px 8px",fontSize:12,outline:"none",fontFamily:"monospace"}}/></div>
+                        <div style={{flexShrink:0,textAlign:"center"}}><div style={{fontSize:10,color:"#64748b",marginBottom:2}}>製造完了</div><button onClick={()=>setForm(f=>({...f,_ops:f._ops.map((pp,i)=>i===pi?{...pp,done:!pp.done}:pp)}))} style={{width:36,height:28,borderRadius:6,border:"2px solid "+(p.done?"#10b981":"#cbd5e1"),background:p.done?"#10b981":"#fff",color:"#fff",cursor:"pointer",fontWeight:800,fontSize:13}}>{p.done?"✓":""}</button></div>
+                        <button onClick={()=>setForm(f=>({...f,_ops:f._ops.filter((_,i)=>i!==pi)}))} style={{background:"#fee2e2",color:"#ef4444",border:"none",borderRadius:6,padding:"6px 8px",cursor:"pointer",fontWeight:700,fontSize:13,flexShrink:0,alignSelf:"flex-end"}}>✕</button>
                       </div>
                     ))}
                   </div>
-                  <button onClick={()=>setForm(f=>({...f,_ordProds:[...(f._ordProds||[]),{model:"",serialNo:"",done:false}]}))}
-                    style={{background:"#f1f5f9",color:"#334155",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8,width:"100%"}}>＋ 製品を追加</button>
+                  <button onClick={()=>setForm(f=>({...f,_ops:[...(f._ops||[]),{model:"",serialNo:"",done:false}]}))} style={{background:"#f1f5f9",color:"#334155",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer",marginTop:8,width:"100%"}}>＋ 製品を追加</button>
                 </div>
                 <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
                   <button onClick={()=>setModal(null)} style={{border:"1px solid #e2e8f0",background:"#fff",borderRadius:8,padding:"7px 15px",fontSize:13,cursor:"pointer"}}>キャンセル</button>
@@ -2043,18 +1892,15 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
             {/* 取引先編集 */}
             {modal.type==="editClient"&&(
               <>
-                <h2 style={{fontSize:17,fontWeight:800,marginBottom:14}}>取引先を編集</h2>
+                <h2 style={{fontSize:17,fontWeight:800,marginBottom:12}}>取引先を編集</h2>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
-                  <div style={{gridColumn:"1/-1"}}>
-                    {lbl("登録コード（変更不可）")}
-                    <input readOnly value={form._cCode||""} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,background:"#f8fafc",fontFamily:"monospace",fontWeight:700}}/>
-                  </div>
-                  <div style={{gridColumn:"1/-1"}}>{lbl("取引先名")}<input value={form._cName||""} onChange={e=>setForm(p=>({...p,_cName:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
-                  <div>{lbl("郵便番号")}<input value={form._cZip||""} onChange={e=>setForm(p=>({...p,_cZip:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
-                  <div>{lbl("電話番号")}<input value={form._cTel||""} onChange={e=>setForm(p=>({...p,_cTel:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
-                  <div style={{gridColumn:"1/-1"}}>{lbl("住所")}<input value={form._cAddr||""} onChange={e=>setForm(p=>({...p,_cAddr:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
-                  <div>{lbl("区分1")}<input value={form._cCat||""} onChange={e=>setForm(p=>({...p,_cCat:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
-                  <div>{lbl("備考")}<input value={form._cNote||""} onChange={e=>setForm(p=>({...p,_cNote:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
+                  <div style={{gridColumn:"1/-1"}}><label style={{display:"block",fontSize:11,fontWeight:700,color:"#64748b",marginBottom:3}}>登録コード（変更不可）</label><input readOnly value={form._cc||""} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,background:"#f8fafc",fontFamily:"monospace",fontWeight:700}}/></div>
+                  <div style={{gridColumn:"1/-1"}}>{lbl("取引先名")}<input value={form._cn||""} onChange={e=>setForm(p=>({...p,_cn:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("郵便番号")}<input value={form._cz||""} onChange={e=>setForm(p=>({...p,_cz:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("電話番号")}<input value={form._ct||""} onChange={e=>setForm(p=>({...p,_ct:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
+                  <div style={{gridColumn:"1/-1"}}>{lbl("住所")}<input value={form._ca||""} onChange={e=>setForm(p=>({...p,_ca:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("区分1")}<input value={form._ccat||""} onChange={e=>setForm(p=>({...p,_ccat:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("備考")}<input value={form._cnote||""} onChange={e=>setForm(p=>({...p,_cnote:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
                 </div>
                 <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
                   <button onClick={()=>setModal(null)} style={{border:"1px solid #e2e8f0",background:"#fff",borderRadius:8,padding:"7px 15px",fontSize:13,cursor:"pointer"}}>キャンセル</button>
@@ -2063,29 +1909,22 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
               </>
             )}
 
-            {/* CSVインポート */}
+            {/* CSV インポート */}
             {modal.type==="importCSV"&&(
               <>
-                <h2 style={{fontSize:17,fontWeight:800,marginBottom:4}}>取引先CSVインポート</h2>
+                <h2 style={{fontSize:17,fontWeight:800,marginBottom:8}}>取引先 CSVインポート</h2>
                 <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#065f46"}}>
-                  <div style={{fontWeight:700,marginBottom:4}}>CSVフォーマット（1行目はヘッダー行）</div>
+                  <div style={{fontWeight:700,marginBottom:3}}>CSVフォーマット（1行目はヘッダー行）</div>
                   <code style={{fontSize:11,display:"block",background:"#fff",padding:"4px 8px",borderRadius:4,color:"#334155"}}>登録コード,取引先名,郵便番号,住所,電話番号,区分1,備考</code>
-                  <div style={{marginTop:4,fontSize:11}}>※ 登録コードが既存と重複する場合はスキップされます</div>
+                  <div style={{marginTop:3,fontSize:11}}>※ 登録コードが既存と重複する場合はスキップされます</div>
+                </div>
+                <div style={{marginBottom:10}}>
+                  <label style={{display:"block",fontSize:12,fontWeight:700,color:"#64748b",marginBottom:5}}>ファイルを選択</label>
+                  <input type="file" accept=".csv,.txt" onChange={e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>setForm(p=>({...p,_csvText:ev.target.result}));r.readAsText(f,"UTF-8");}} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13}}/>
                 </div>
                 <div style={{marginBottom:12}}>
-                  <label style={{display:"block",fontSize:12,fontWeight:700,color:"#64748b",marginBottom:6}}>ファイルを選択</label>
-                  <input type="file" accept=".csv,.txt" onChange={e=>{
-                    const file=e.target.files[0];
-                    if(!file)return;
-                    const reader=new FileReader();
-                    reader.onload=ev=>setForm(p=>({...p,_csvText:ev.target.result}));
-                    reader.readAsText(file,"UTF-8");
-                  }} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13}}/>
-                </div>
-                <div style={{marginBottom:12}}>
-                  <label style={{display:"block",fontSize:12,fontWeight:700,color:"#64748b",marginBottom:6}}>またはテキストを貼り付け</label>
-                  <textarea value={form._csvText||""} onChange={e=>setForm(p=>({...p,_csvText:e.target.value}))} placeholder="CSVの内容をここに貼り付け…" rows={6}
-                    style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px",fontSize:12,fontFamily:"monospace",resize:"vertical",outline:"none"}}/>
+                  <label style={{display:"block",fontSize:12,fontWeight:700,color:"#64748b",marginBottom:5}}>またはテキストを貼り付け</label>
+                  <textarea value={form._csvText||""} onChange={e=>setForm(p=>({...p,_csvText:e.target.value}))} placeholder="CSVの内容をここに貼り付け…" rows={5} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"8px 10px",fontSize:12,fontFamily:"monospace",resize:"vertical",outline:"none"}}/>
                 </div>
                 <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
                   <button onClick={()=>setModal(null)} style={{border:"1px solid #e2e8f0",background:"#fff",borderRadius:8,padding:"7px 15px",fontSize:13,cursor:"pointer"}}>キャンセル</button>
@@ -2128,12 +1967,6 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
-</script>
-<script>
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.getRegistrations().then(regs=>{regs.forEach(r=>r.unregister());});
-  caches.keys().then(names=>{names.forEach(n=>caches.delete(n));});
-}
 </script>
 </body>
 </html>
