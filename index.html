@@ -1501,6 +1501,31 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                         {window.db&&<span style={{fontSize:12,color:"#10b981",fontWeight:700}}>✓ 同期中</span>}
                         {!window.db&&<span style={{fontSize:12,color:"#94a3b8"}}>未設定</span>}
                       </div>
+                      {/* 貼り付けメモ欄 */}
+                      <div style={{marginTop:14,borderTop:"1px solid #bae6fd",paddingTop:12}}>
+                        <div style={{fontSize:12,fontWeight:700,color:"#0369a1",marginBottom:4}}>📋 設定コードを貼り付けて一括入力</div>
+                        <div style={{fontSize:11,color:"#0284c7",marginBottom:8}}>Firebase Consoleからコピーした設定コードをそのまま貼り付けると各項目に自動反映します</div>
+                        <textarea id="fb_paste" rows={7}
+                          placeholder="const firebaseConfig = {&#10;  apiKey: &quot;AIzaSy...&quot;,&#10;  authDomain: &quot;xxx.firebaseapp.com&quot;,&#10;  projectId: &quot;xxx&quot;,&#10;  storageBucket: &quot;xxx.appspot.com&quot;,&#10;  messagingSenderId: &quot;123456&quot;,&#10;  appId: &quot;1:xxx:web:xxx&quot;&#10;};"
+                          style={{width:"100%",border:"1px solid #bae6fd",borderRadius:8,padding:"8px 10px",fontSize:11,fontFamily:"monospace",resize:"vertical",outline:"none",background:"#f0f9ff"}}/>
+                        <button onClick={()=>{
+                          const ta=document.getElementById("fb_paste");
+                          if(!ta)return;
+                          const text=ta.value;
+                          try{
+                            const cfg={};
+                            const re=/(\w+)\s*:\s*["']([^"']+)["']/g;
+                            let m;
+                            while((m=re.exec(text))!==null){cfg[m[1]]=m[2];}
+                            if(!cfg.apiKey||!cfg.projectId){alert("apiKeyとprojectIdが見つかりません。Firebase Consoleの設定コードをそのまま貼り付けてください。");return;}
+                            const fields=["apiKey","authDomain","projectId","storageBucket","messagingSenderId","appId"];
+                            fields.forEach(k=>{const el=document.getElementById("fb_"+k);if(el&&cfg[k])el.value=cfg[k];});
+                            alert("各項目に反映しました！内容を確認して保存してリロードを押してください。");
+                          }catch(e){alert("解析エラー: "+e.message);}
+                        }} style={{marginTop:7,background:"#0369a1",color:"#fff",border:"none",borderRadius:7,padding:"7px 16px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                          📥 各項目に反映する
+                        </button>
+                      </div>
                       <div style={{marginTop:8,fontSize:11,color:"#0369a1",background:"#e0f2fe",borderRadius:5,padding:"5px 10px"}}>💡 Firebase Console → プロジェクトの設定 → 全般 → アプリ → SDK設定と構成 で確認できます</div>
                     </div>
                   );
