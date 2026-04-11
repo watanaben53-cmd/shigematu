@@ -207,37 +207,7 @@ function App(){
     return ()=>clearTimeout(timer);
   },[data]);
 
-  // Firestore同期：データ変更時にアップロード
-  useEffect(()=>{
-    const timer=setTimeout(()=>{
-      try{
-        window.db.collection("inventory").doc("main").set({
-          data:JSON.stringify(data),
-          updatedAt:new Date().toISOString()
-        }).catch(e=>console.log("Firestore save error:",e));
-      }catch(e){console.log("Firestore error:",e);}
-    },1500); // 1.5秒待ってからまとめて保存
-    return ()=>clearTimeout(timer);
-  },[data]);
 
-  // Firestore同期：起動時にクラウドデータを取得
-  useEffect(()=>{
-    const unsub=window.db.collection("inventory").doc("main").onSnapshot(doc=>{
-      if(doc.exists){
-        try{
-          const cloudData=JSON.parse(doc.data().data);
-          // クラウドのデータがローカルより新しければ反映
-          const cloudUpdated=doc.data().updatedAt||"";
-          const localUpdated=localStorage.getItem("inv_updated")||"";
-          if(cloudUpdated>localUpdated){
-            setData({boms:[],sales:[],subCategories:{...DSUBS},staff:[],trash:[],...cloudData});
-            localStorage.setItem("inv_updated",cloudUpdated);
-          }
-        }catch(e){console.log("Firestore load error:",e);}
-      }
-    },e=>console.log("Firestore listener error:",e));
-    return ()=>unsub();
-  },[]);
   useEffect(()=>{if(modal&&modal.type==="item"&&nameRef.current)setTimeout(()=>nameRef.current&&nameRef.current.focus(),100);},[modal]);
 
   const subs=useMemo(()=>({...DSUBS,...(data.subCategories||{})}),[data.subCategories]);
