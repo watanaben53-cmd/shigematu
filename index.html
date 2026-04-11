@@ -618,19 +618,85 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
   }
 
   // ===== 受注・製造管理 =====
-  function openNewOrder(){setForm({_oc:"",_oa:"",_od:todayStr(),_odl:"",_on:"",_ops:[{model:"",serialNo:"",done:false}]});setModal({type:"order"});}
-  function openEditOrder(ord){setForm({_oc:ord.client,_oa:ord.address||"",_od:ord.orderDate,_odl:ord.deadline||"",_on:ord.note||"",_ops:ord.products.map(p=>({...p}))});setModal({type:"order",id:ord.id});}
+  function openNewOrder(){
+    setForm({_oc:"",_oa:"",_od:todayStr(),_odl:"",_on:"",_ops:[{model:"",serialNo:"",done:false}]});
+    setModal({type:"order"});
+  }
+  function openEditOrder(ord){
+    if(ord.shipped){alert("出荷済みの受注は編集できません");return;}
+    setForm({_oc:ord.client,_oa:ord.address||"",_od:ord.orderDate,_odl:ord.deadline||"",_on:ord.note||"",_ops:ord.products.map(p=>({...p}))});
+    setModal({type:"order",id:ord.id});
+  }
   function saveOrder(){
     if(!(form._oc||"").trim()){alert("取引先を入力してください");return;}
     const prods=(form._ops||[]).filter(p=>(p.model||"").trim());
     if(!prods.length){alert("製品型式を1つ以上入力してください");return;}
     const base={client:form._oc.trim(),address:form._oa||"",orderDate:form._od||todayStr(),deadline:form._odl||"",note:form._on||"",products:prods};
-    if(modal.id){setData(d=>({...d,orders:(d.orders||[]).map(o=>o.id===modal.id?{...base,id:o.id,createdAt:o.createdAt}:o)}));}
-    else{setData(d=>({...d,orders:[...(d.orders||[]),{...base,id:genId(),createdAt:nowStr()}]}));}
+    if(modal.id){
+      setData(d=>({...d,orders:(d.orders||[]).map(o=>o.id===modal.id?{...base,id:o.id,createdAt:o.createdAt,shipped:o.shipped||false,shippedAt:o.shippedAt||""}:o)}));
+    }else{
+      setData(d=>({...d,orders:[...(d.orders||[]),{...base,id:genId(),createdAt:nowStr(),shipped:false,shippedAt:""}]}));
+    }
     setModal(null);
   }
-  function deleteOrder(id){if(!confirm("この受注を削除しますか？"))return;setData(d=>({...d,orders:(d.orders||[]).filter(o=>o.id!==id)}));}
-  function toggleDone(ordId,pi){setData(d=>({...d,orders:(d.orders||[]).map(o=>o.id!==ordId?o:{...o,products:o.products.map((p,i)=>i===pi?{...p,done:!p.done}:p)})}));}
+  function deleteOrder(id){
+    if(!confirm("この受注を削除しますか？\nダッシュボードからも削除されます。"))return;
+    setData(d=>({...d,orders:(d.orders||[]).filter(o=>o.id!==id)}));
+  }
+  function toggleDone(ordId,pi){
+    setData(d=>({...d,orders:(d.orders||[]).map(o=>o.id!==ordId?o:{...o,products:o.products.map((p,i)=>i===pi?{...p,done:!p.done}:p)})}));
+  }
+  function shipOrder(ord){
+    if(!confirm("出荷完了にしますか？\n販売記録と在庫に自動反映されます。"))return;
+    const date=todayStr();
+    const saleId=genId();
+    // 製品ごとに販売記録・出庫トランザクション作成
+    const newSales=[];
+    const newTxs=[];
+    ord.products.forEach(p=>{
+      // 製品名からitemsを探す（型式で検索）
+      const item=data.items.find(i=>i.name===p.model||i.sku===p.model);
+      const sId=genId();
+      newSales.push({
+        id:sId,
+        productId:item?item.id:"",
+        quantity:1,
+        customer:ord.client,
+        date,
+        serialNo:p.serialNo||"",
+        prefecture:ord.address||"",
+        shopName:"",
+        contactPerson:"",
+        note:"受注出荷 受注ID:"+ord.id,
+        saleId:sId
+      });
+      if(item){
+        newTxs.push({id:genId(),saleId:sId,itemId:item.id,type:"out",quantity:1,date,note:"出荷: "+ord.client});
+        // BOM連動
+        const bom=(data.boms||[]).find(b=>b.productId===item.id);
+        if(bom){
+          bom.parts.forEach(part=>{
+            newTxs.push({id:genId(),saleId:sId,itemId:part.partId,type:"out",quantity:part.qty,date,note:"出荷連動: "+ord.client});
+          });
+        }
+      }
+    });
+    setData(d=>{
+      // 在庫更新
+      let items=[...d.items];
+      newTxs.forEach(tx=>{
+        items=items.map(i=>i.id!==tx.itemId?i:{...i,quantity:Math.max(0,i.quantity-tx.quantity)});
+      });
+      return{
+        ...d,
+        items,
+        transactions:[...d.transactions,...newTxs],
+        sales:[...(d.sales||[]),...newSales],
+        orders:(d.orders||[]).map(o=>o.id!==ord.id?o:{...o,shipped:true,shippedAt:nowStr()})
+      };
+    });
+    alert("出荷完了しました。販売記録と在庫に反映されました。");
+  }
 
   // ===== 取引先管理 =====
   function genClientCode(clients){
@@ -838,12 +904,12 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
 
               {/* 受注・製造状況（折りたたみ）*/}
               {(()=>{
-                const ords=data.orders||[];
+                const ords=(data.orders||[]).filter(o=>!o.shipped);
                 if(!ords.length)return null;
-                const asmb=ords.filter(o=>o.products.some(p=>!p.done)).length;
-                const wait=ords.filter(o=>o.products.length>0&&o.products.every(p=>p.done)).length;
+                const asmb=ords.filter(o=>o.products.some(p=>!p.done)&&!o.shipped).length;
+                const wait=ords.filter(o=>o.products.length>0&&o.products.every(p=>p.done)&&!o.shipped).length;
                 return(
-                  <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",marginTop:16,overflow:"hidden"}}>
+                  <div style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",marginTop:18,overflow:"hidden"}}>
                     <div onClick={()=>setOrderPanelOpen(o=>!o)} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",cursor:"pointer",userSelect:"none",background:orderPanelOpen?"#f5f3ff":"#fff",borderBottom:orderPanelOpen?"1px solid #e9d5ff":"none"}}>
                       <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                         <h2 style={{fontSize:14,fontWeight:700,color:"#6d28d9",margin:0}}>🏭 受注・製造状況</h2>
@@ -1355,7 +1421,7 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
               </div>
               {(data.orders||[]).length>0&&(
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:16}}>
-                  {[{label:"受注総数",val:(data.orders||[]).length,unit:"件",col:"#8b5cf6"},{label:"組み立て中",val:(data.orders||[]).filter(o=>o.products.some(p=>!p.done)).length,unit:"件",col:"#f59e0b"},{label:"出荷待ち",val:(data.orders||[]).filter(o=>o.products.length>0&&o.products.every(p=>p.done)).length,unit:"件",col:"#3b82f6"}].map(c=>(
+                  {[{label:"受注総数",val:(data.orders||[]).length,unit:"件",col:"#8b5cf6"},{label:"組み立て中",val:(data.orders||[]).filter(o=>!o.shipped&&o.products.some(p=>!p.done)).length,unit:"件",col:"#f59e0b"},{label:"出荷待ち",val:(data.orders||[]).filter(o=>!o.shipped&&o.products.every(p=>p.done)).length,unit:"件",col:"#3b82f6"},{label:"出荷済み",val:(data.orders||[]).filter(o=>o.shipped).length,unit:"件",col:"#10b981"}].map(c=>(
                     <div key={c.label} style={{background:"#fff",borderRadius:12,padding:"12px 14px",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",borderTop:"3px solid "+c.col}}>
                       <div style={{fontSize:10,fontWeight:700,color:"#64748b",marginBottom:4,textTransform:"uppercase"}}>{c.label}</div>
                       <div style={{fontSize:22,fontWeight:800,color:c.col}}>{c.val}<span style={{fontSize:12,fontWeight:400,color:"#94a3b8",marginLeft:3}}>{c.unit}</span></div>
@@ -1373,16 +1439,28 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
               <div style={{display:"flex",flexDirection:"column",gap:14}}>
                 {[...(data.orders||[])].sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).map(ord=>{
                   const allDone=ord.products.every(p=>p.done);
+                  const shipped=ord.shipped||false;
+                  const statusLabel=shipped?"✓ 出荷済み":allDone?"出荷待ち":"組み立て中";
+                  const statusBg=shipped?"#f0fdf4":allDone?"#eff6ff":"#fffbeb";
+                  const statusCol=shipped?"#10b981":allDone?"#3b82f6":"#f59e0b";
+                  const borderCol=shipped?"#bbf7d0":allDone?"#bfdbfe":"#fde68a";
                   return(
-                    <div key={ord.id} style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",overflow:"hidden",border:"1px solid "+(allDone?"#bfdbfe":"#fde68a")}}>
-                      <div style={{padding:"12px 16px",background:allDone?"#eff6ff":"#fffbeb",display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
+                    <div key={ord.id} style={{background:"#fff",borderRadius:12,boxShadow:"0 1px 4px rgba(0,0,0,0.06)",overflow:"hidden",border:"1px solid "+borderCol,opacity:shipped?0.75:1}}>
+                      <div style={{padding:"12px 16px",background:statusBg,display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8}}>
                         <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                          <span style={{background:allDone?"#3b82f6":"#f59e0b",color:"#fff",borderRadius:6,padding:"3px 10px",fontSize:12,fontWeight:700}}>{allDone?"出荷待ち":"組み立て中"}</span>
+                          <span style={{background:statusCol,color:"#fff",borderRadius:6,padding:"3px 10px",fontSize:12,fontWeight:700}}>{statusLabel}</span>
                           <span style={{fontWeight:800,fontSize:15}}>{ord.client}</span>
                           {ord.deadline&&<span style={{fontSize:12,color:"#64748b"}}>納期：<strong>{ord.deadline}</strong></span>}
+                          {shipped&&ord.shippedAt&&<span style={{fontSize:11,color:"#64748b"}}>出荷日：{ord.shippedAt.slice(0,10)}</span>}
                         </div>
-                        <div style={{display:"flex",gap:6}}>
-                          {SBtn("✎ 編集",()=>openEditOrder(ord),"#f1f5f9","#475569")}
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                          {!shipped&&allDone&&(
+                            <button onClick={()=>shipOrder(ord)}
+                              style={{background:"#10b981",color:"#fff",border:"none",borderRadius:7,padding:"5px 12px",fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                              🚚 出荷完了
+                            </button>
+                          )}
+                          {!shipped&&SBtn("✎ 編集",()=>openEditOrder(ord),"#f1f5f9","#475569")}
                           {SBtn("削除",()=>deleteOrder(ord.id),"#fee2e2","#ef4444")}
                         </div>
                       </div>
@@ -1396,9 +1474,20 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                         <div style={{display:"flex",flexDirection:"column",gap:5}}>
                           {ord.products.map((p,pi)=>(
                             <div key={pi} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",borderRadius:8,background:p.done?"#f0fdf4":"#fafafa",border:"1px solid "+(p.done?"#bbf7d0":"#e2e8f0")}}>
-                              <button onClick={()=>toggleDone(ord.id,pi)} style={{width:24,height:24,borderRadius:5,border:"2px solid "+(p.done?"#10b981":"#cbd5e1"),background:p.done?"#10b981":"#fff",color:"#fff",cursor:"pointer",fontWeight:800,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>{p.done?"✓":""}</button>
-                              <div style={{flex:1}}><span style={{fontWeight:700,color:p.done?"#065f46":"#1e293b"}}>{p.model}</span>{p.serialNo&&<span style={{fontSize:11,color:"#64748b",marginLeft:8,fontFamily:"monospace"}}>No.{p.serialNo}</span>}</div>
-                              <span style={{fontSize:11,fontWeight:700,color:p.done?"#10b981":"#f59e0b",flexShrink:0,whiteSpace:"nowrap"}}>{p.done?"✓ 完了":"⚙ 組み立て中"}</span>
+                              {!shipped&&(
+                                <button onClick={()=>toggleDone(ord.id,pi)}
+                                  style={{width:24,height:24,borderRadius:5,border:"2px solid "+(p.done?"#10b981":"#cbd5e1"),background:p.done?"#10b981":"#fff",color:"#fff",cursor:"pointer",fontWeight:800,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                                  {p.done?"✓":""}
+                                </button>
+                              )}
+                              {shipped&&<span style={{color:"#10b981",fontSize:16,flexShrink:0}}>✓</span>}
+                              <div style={{flex:1}}>
+                                <span style={{fontWeight:700,color:p.done?"#065f46":"#1e293b"}}>{p.model}</span>
+                                {p.serialNo&&<span style={{fontSize:11,color:"#64748b",marginLeft:8,fontFamily:"monospace"}}>No.{p.serialNo}</span>}
+                              </div>
+                              <span style={{fontSize:11,fontWeight:700,color:shipped?"#10b981":p.done?"#10b981":"#f59e0b",flexShrink:0,whiteSpace:"nowrap"}}>
+                                {shipped?"出荷済み":p.done?"✓ 完了":"⚙ 組み立て中"}
+                              </span>
                             </div>
                           ))}
                         </div>
