@@ -665,16 +665,16 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
     if(!name){alert("取引先／仕入先名を入力してください");return;}
     setData(d=>{
       const code=genClientCode(d.clients);
-      return {...d,clients:[...(d.clients||[]),{code,name,zip:form._cz||"",address:form._ca||"",tel:form._ct||"",category:form._ccat||"",note:form._cnote||""}]};
+      return {...d,clients:[...(d.clients||[]),{code,name,zip:form._cz||"",address:form._ca||"",tel:form._ct||"",fax:form._cfax||"",category:form._ccat||"",note:form._cnote||""}]};
     });
-    setForm(p=>({...p,_cn:"",_cz:"",_ca:"",_ct:"",_ccat:"",_cnote:""}));
+    setForm(p=>({...p,_cn:"",_cz:"",_ca:"",_ct:"",_cfax:"",_ccat:"",_cnote:""}));
   }
   function deleteClient(code){if(!confirm("削除しますか？"))return;setData(d=>({...d,clients:(d.clients||[]).filter(c=>c.code!==code)}));}
-  function openEditClient(c){setForm({_cc:c.code,_cn:c.name,_cz:c.zip||"",_ca:c.address||"",_ct:c.tel||"",_ccat:c.category||"",_cnote:c.note||""});setModal({type:"editClient",id:c.code});}
+  function openEditClient(c){setForm({_cc:c.code,_cn:c.name,_cz:c.zip||"",_ca:c.address||"",_ct:c.tel||"",_cfax:c.fax||"",_ccat:c.category||"",_cnote:c.note||""});setModal({type:"editClient",id:c.code});}
   function saveEditClient(){
     const name=(form._cn||"").trim();
     if(!name){alert("取引先／仕入先名を入力してください");return;}
-    setData(d=>({...d,clients:(d.clients||[]).map(c=>c.code===modal.id?{...c,name,zip:form._cz||"",address:form._ca||"",tel:form._ct||"",category:form._ccat||"",note:form._cnote||""}:c)}));
+    setData(d=>({...d,clients:(d.clients||[]).map(c=>c.code===modal.id?{...c,name,zip:form._cz||"",address:form._ca||"",tel:form._ct||"",fax:form._cfax||"",category:form._ccat||"",note:form._cnote||""}:c)}));
     setModal(null);
   }
   function importClientCSV(text){
@@ -686,7 +686,7 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
         const cols=line.split(",").map(v=>v.replace(/^"|"$/g,"").trim());
         if(cols.length<2||!cols[0])return;
         if(existing.has(cols[0])){skip++;return;}
-        imported.push({code:cols[0],name:cols[1]||"",zip:cols[2]||"",address:cols[3]||"",tel:cols[4]||"",category:cols[5]||"",note:cols[6]||""});
+        imported.push({code:cols[0],name:cols[1]||"",zip:cols[2]||"",address:cols[3]||"",tel:cols[4]||"",fax:cols[5]||"",category:cols[6]||"",note:cols[7]||""});
         existing.add(cols[0]);
       });
       if(!imported.length){alert("インポートできるデータがありませんでした。重複スキップ: "+skip+"件");return;}
@@ -1434,8 +1434,8 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                 <div style={{display:"flex",gap:7}}>
                   <button onClick={()=>{setForm(p=>({...p,_csvText:""}));setModal({type:"importCSV"});}} style={{background:"#10b981",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>📂 CSVインポート</button>
                   <button onClick={()=>{
-                    const hdr="登録コード,取引先／仕入先名,郵便番号,住所,電話番号,区分1,備考";
-                    const rows=(data.clients||[]).map(c=>[c.code,c.name,c.zip||"",c.address||"",c.tel||"",c.category||"",c.note||""].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(","));
+                    const hdr="登録コード,取引先／仕入先名,郵便番号,住所,電話番号,FAX番号,区分1,備考";
+                    const rows=(data.clients||[]).map(c=>[c.code,c.name,c.zip||"",c.address||"",c.tel||"",c.fax||"",c.category||"",c.note||""].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(","));
                     const csv=[hdr,...rows].join("\n");
                     const blob=new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8"});
                     const url=URL.createObjectURL(blob);
@@ -1450,6 +1450,7 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                   <div>{lbl("取引先／仕入先名")}<input value={form._cn||""} onChange={e=>setForm(p=>({...p,_cn:e.target.value}))} placeholder="例：株式会社〇〇" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("郵便番号")}<input value={form._cz||""} onChange={e=>setForm(p=>({...p,_cz:e.target.value}))} placeholder="123-4567" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("電話番号")}<input value={form._ct||""} onChange={e=>setForm(p=>({...p,_ct:e.target.value}))} placeholder="06-1234-5678" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("FAX番号")}<input value={form._cfax||""} onChange={e=>setForm(p=>({...p,_cfax:e.target.value}))} placeholder="例：06-1234-5679" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("住所")}<input value={form._ca||""} onChange={e=>setForm(p=>({...p,_ca:e.target.value}))} placeholder="大阪府大阪市〇〇" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("区分1")}<input value={form._ccat||""} onChange={e=>setForm(p=>({...p,_ccat:e.target.value}))} placeholder="例：販売店" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("備考")}<input value={form._cnote||""} onChange={e=>setForm(p=>({...p,_cnote:e.target.value}))} placeholder="備考" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
@@ -1460,7 +1461,7 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                 <div style={{padding:"10px 16px",borderBottom:"1px solid #f1f5f9"}}><span style={{fontWeight:700,fontSize:14}}>登録済み取引先</span><span style={{fontSize:12,color:"#94a3b8",marginLeft:8}}>{(data.clients||[]).length}件</span></div>
                 {(data.clients||[]).length===0?<div style={{padding:28,textAlign:"center",color:"#94a3b8",fontSize:13}}>取引先が登録されていません</div>:(
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:800}}>
-                    <thead style={{background:"#f8fafc"}}><tr><TH c="登録コード"/><TH c="取引先／仕入先名"/><TH c="郵便番号"/><TH c="住所"/><TH c="電話番号"/><TH c="区分1"/><TH c="備考"/><TH c="操作"/></tr></thead>
+                    <thead style={{background:"#f8fafc"}}><tr><TH c="登録コード"/><TH c="取引先／仕入先名"/><TH c="郵便番号"/><TH c="住所"/><TH c="電話番号"/><TH c="FAX番号"/><TH c="区分1"/><TH c="備考"/><TH c="操作"/></tr></thead>
                     <tbody>{(data.clients||[]).map((c,idx)=>(
                       <tr key={c.code} style={{borderBottom:"1px solid #f8fafc",background:idx%2===0?"#fff":"#fafafa"}}>
                         <TD s={{fontFamily:"monospace",fontWeight:700,color:"#3b82f6"}}>{c.code}</TD>
@@ -1468,6 +1469,7 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                         <TD s={{color:"#64748b"}}>{c.zip||"—"}</TD>
                         <TD s={{color:"#64748b",fontSize:12}}>{c.address||"—"}</TD>
                         <TD s={{color:"#64748b"}}>{c.tel||"—"}</TD>
+                        <TD s={{color:"#64748b"}}>{c.fax||"—"}</TD>
                         <TD>{c.category?<span style={{background:"#f1f5f9",borderRadius:4,padding:"1px 7px",fontSize:11}}>{c.category}</span>:"—"}</TD>
                         <TD s={{color:"#64748b",fontSize:12}}>{c.note||"—"}</TD>
                         <TD><div style={{display:"flex",gap:4}}>{SBtn("編集",()=>openEditClient(c),"#f1f5f9","#475569")}{SBtn("削除",()=>deleteClient(c.code),"#fee2e2","#ef4444")}</div></TD>
@@ -2003,6 +2005,7 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                   <div style={{gridColumn:"1/-1"}}>{lbl("取引先／仕入先名")}<input value={form._cn||""} onChange={e=>setForm(p=>({...p,_cn:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("郵便番号")}<input value={form._cz||""} onChange={e=>setForm(p=>({...p,_cz:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("電話番号")}<input value={form._ct||""} onChange={e=>setForm(p=>({...p,_ct:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("FAX番号")}<input value={form._cfax||""} onChange={e=>setForm(p=>({...p,_cfax:e.target.value}))} placeholder="例：06-1234-5679" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
                   <div style={{gridColumn:"1/-1"}}>{lbl("住所")}<input value={form._ca||""} onChange={e=>setForm(p=>({...p,_ca:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("区分1")}<input value={form._ccat||""} onChange={e=>setForm(p=>({...p,_ccat:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("備考")}<input value={form._cnote||""} onChange={e=>setForm(p=>({...p,_cnote:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
@@ -2020,7 +2023,7 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                 <h2 style={{fontSize:17,fontWeight:800,marginBottom:8}}>取引先 CSVインポート</h2>
                 <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:8,padding:"10px 12px",marginBottom:12,fontSize:12,color:"#065f46"}}>
                   <div style={{fontWeight:700,marginBottom:3}}>CSVフォーマット（1行目はヘッダー行）</div>
-                  <code style={{fontSize:11,display:"block",background:"#fff",padding:"4px 8px",borderRadius:4,color:"#334155"}}>登録コード,取引先名,郵便番号,住所,電話番号,区分1,備考</code>
+                  <code style={{fontSize:11,display:"block",background:"#fff",padding:"4px 8px",borderRadius:4,color:"#334155"}}>登録コード,取引先名,郵便番号,住所,電話番号,FAX番号,区分1,備考</code>
                   <div style={{marginTop:3,fontSize:11}}>※ 登録コードが既存と重複する場合はスキップされます</div>
                 </div>
                 <div style={{marginBottom:10}}>
