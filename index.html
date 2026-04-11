@@ -144,6 +144,9 @@ function App(){
   const [invMonth,setInvMonth]=useState("");
   const [invActual,setInvActual]=useState({});
   const [bomSearch,setBomSearch]=useState("");
+  const [clientSearchSale,setClientSearchSale]=useState("");
+  const [clientSearchItem,setClientSearchItem]=useState("");
+  const [clientSearchTx,setClientSearchTx]=useState("");
   const [bomCat,setBomCat]=useState("全て");
   const [bomSub,setBomSub]=useState("全て");
   const nameRef=useRef(null);
@@ -652,18 +655,25 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
   function toggleDone(ordId,pi){setData(d=>({...d,orders:(d.orders||[]).map(o=>o.id!==ordId?o:{...o,products:o.products.map((p,i)=>i===pi?{...p,done:!p.done}:p)})}));}
 
   // ===== 取引先管理 =====
+  function genClientCode(clients){
+    const nums=(clients||[]).map(c=>parseInt(c.code,10)).filter(n=>!isNaN(n));
+    const max=nums.length?Math.max(...nums):0;
+    return String(max+1).padStart(6,"0");
+  }
   function addClient(){
-    const code=(form._cc||"").trim(),name=(form._cn||"").trim();
-    if(!code||!name){alert("登録コードと取引先名を入力してください");return;}
-    if((data.clients||[]).some(c=>c.code===code)){alert("このコードは既に使用されています");return;}
-    setData(d=>({...d,clients:[...(d.clients||[]),{code,name,zip:form._cz||"",address:form._ca||"",tel:form._ct||"",category:form._ccat||"",note:form._cnote||""}]}));
-    setForm(p=>({...p,_cc:"",_cn:"",_cz:"",_ca:"",_ct:"",_ccat:"",_cnote:""}));
+    const name=(form._cn||"").trim();
+    if(!name){alert("取引先／仕入先名を入力してください");return;}
+    setData(d=>{
+      const code=genClientCode(d.clients);
+      return {...d,clients:[...(d.clients||[]),{code,name,zip:form._cz||"",address:form._ca||"",tel:form._ct||"",category:form._ccat||"",note:form._cnote||""}]};
+    });
+    setForm(p=>({...p,_cn:"",_cz:"",_ca:"",_ct:"",_ccat:"",_cnote:""}));
   }
   function deleteClient(code){if(!confirm("削除しますか？"))return;setData(d=>({...d,clients:(d.clients||[]).filter(c=>c.code!==code)}));}
   function openEditClient(c){setForm({_cc:c.code,_cn:c.name,_cz:c.zip||"",_ca:c.address||"",_ct:c.tel||"",_ccat:c.category||"",_cnote:c.note||""});setModal({type:"editClient",id:c.code});}
   function saveEditClient(){
     const name=(form._cn||"").trim();
-    if(!name){alert("取引先名を入力してください");return;}
+    if(!name){alert("取引先／仕入先名を入力してください");return;}
     setData(d=>({...d,clients:(d.clients||[]).map(c=>c.code===modal.id?{...c,name,zip:form._cz||"",address:form._ca||"",tel:form._ct||"",category:form._ccat||"",note:form._cnote||""}:c)}));
     setModal(null);
   }
@@ -1424,7 +1434,7 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                 <div style={{display:"flex",gap:7}}>
                   <button onClick={()=>{setForm(p=>({...p,_csvText:""}));setModal({type:"importCSV"});}} style={{background:"#10b981",color:"#fff",border:"none",borderRadius:8,padding:"7px 14px",fontSize:13,fontWeight:700,cursor:"pointer"}}>📂 CSVインポート</button>
                   <button onClick={()=>{
-                    const hdr="登録コード,取引先名,郵便番号,住所,電話番号,区分1,備考";
+                    const hdr="登録コード,取引先／仕入先名,郵便番号,住所,電話番号,区分1,備考";
                     const rows=(data.clients||[]).map(c=>[c.code,c.name,c.zip||"",c.address||"",c.tel||"",c.category||"",c.note||""].map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(","));
                     const csv=[hdr,...rows].join("\n");
                     const blob=new Blob(["﻿"+csv],{type:"text/csv;charset=utf-8"});
@@ -1437,7 +1447,7 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                 <h2 style={{fontSize:14,fontWeight:700,marginBottom:10}}>新規取引先を登録</h2>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:8,marginBottom:10}}>
                   <div>{lbl("登録コード")}<input value={form._cc||""} onChange={e=>setForm(p=>({...p,_cc:e.target.value}))} placeholder="例：C001" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none",fontFamily:"monospace"}}/></div>
-                  <div>{lbl("取引先名")}<input value={form._cn||""} onChange={e=>setForm(p=>({...p,_cn:e.target.value}))} placeholder="例：株式会社〇〇" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
+                  <div>{lbl("取引先／仕入先名")}<input value={form._cn||""} onChange={e=>setForm(p=>({...p,_cn:e.target.value}))} placeholder="例：株式会社〇〇" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("郵便番号")}<input value={form._cz||""} onChange={e=>setForm(p=>({...p,_cz:e.target.value}))} placeholder="123-4567" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("電話番号")}<input value={form._ct||""} onChange={e=>setForm(p=>({...p,_ct:e.target.value}))} placeholder="06-1234-5678" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("住所")}<input value={form._ca||""} onChange={e=>setForm(p=>({...p,_ca:e.target.value}))} placeholder="大阪府大阪市〇〇" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none"}}/></div>
@@ -1450,7 +1460,7 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                 <div style={{padding:"10px 16px",borderBottom:"1px solid #f1f5f9"}}><span style={{fontWeight:700,fontSize:14}}>登録済み取引先</span><span style={{fontSize:12,color:"#94a3b8",marginLeft:8}}>{(data.clients||[]).length}件</span></div>
                 {(data.clients||[]).length===0?<div style={{padding:28,textAlign:"center",color:"#94a3b8",fontSize:13}}>取引先が登録されていません</div>:(
                   <table style={{width:"100%",borderCollapse:"collapse",fontSize:13,minWidth:800}}>
-                    <thead style={{background:"#f8fafc"}}><tr><TH c="登録コード"/><TH c="取引先名"/><TH c="郵便番号"/><TH c="住所"/><TH c="電話番号"/><TH c="区分1"/><TH c="備考"/><TH c="操作"/></tr></thead>
+                    <thead style={{background:"#f8fafc"}}><tr><TH c="登録コード"/><TH c="取引先／仕入先名"/><TH c="郵便番号"/><TH c="住所"/><TH c="電話番号"/><TH c="区分1"/><TH c="備考"/><TH c="操作"/></tr></thead>
                     <tbody>{(data.clients||[]).map((c,idx)=>(
                       <tr key={c.code} style={{borderBottom:"1px solid #f8fafc",background:idx%2===0?"#fff":"#fafafa"}}>
                         <TD s={{fontFamily:"monospace",fontWeight:700,color:"#3b82f6"}}>{c.code}</TD>
@@ -1622,7 +1632,35 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                   <div>{lbl("最低在庫数")}{inp("minQuantity","number")}</div>
                   <div>{lbl("単位")}{inp("unit")}</div>
                   <div>{lbl("単価（円）")}{inp("unitPrice","number")}</div>
-                  <div style={{gridColumn:"1/-1"}}>{lbl("仕入先")}{inp("supplier","text","例：〇〇商事")}</div>
+                  <div style={{gridColumn:"1/-1"}}>
+                    {lbl("仕入先")}
+                    <input value={clientSearchItem} onChange={e=>setClientSearchItem(e.target.value)}
+                      placeholder="取引先名で検索（あいまい検索）"
+                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none",marginBottom:4}}/>
+                    {clientSearchItem&&(()=>{
+                      const filtered=(data.clients||[]).filter(c=>c.name.includes(clientSearchItem)||c.code.includes(clientSearchItem));
+                      return filtered.length>0?(
+                        <div style={{border:"1px solid #e2e8f0",borderRadius:8,background:"#fff",maxHeight:160,overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,0.1)"}}>
+                          {filtered.map(c=>(
+                            <div key={c.code} onClick={()=>{setForm(p=>({...p,supplier:c.name}));setClientSearchItem("");}}
+                              style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #f1f5f9",fontSize:13}}
+                              onMouseEnter={e=>e.target.style.background="#f0f9ff"}
+                              onMouseLeave={e=>e.target.style.background="transparent"}>
+                              <span style={{fontWeight:600}}>{c.name}</span>
+                              <span style={{fontSize:11,color:"#94a3b8",marginLeft:8}}>{c.code}</span>
+                              {c.tel&&<span style={{fontSize:11,color:"#64748b",marginLeft:8}}>{c.tel}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      ):null;
+                    })()}
+                    {form.supplier&&!clientSearchItem&&(
+                      <div style={{display:"flex",alignItems:"center",gap:6,padding:"5px 10px",background:"#f0f9ff",borderRadius:6,border:"1px solid #bae6fd",fontSize:12}}>
+                        <span style={{fontWeight:600,color:"#0369a1"}}>{form.supplier}</span>
+                        <button onClick={()=>{setForm(p=>({...p,supplier:""}));}} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:12,padding:0,marginLeft:"auto"}}>✕</button>
+                      </div>
+                    )}
+                  </div>
                   <div>{lbl("保管場所")}{inp("location")}</div>
                   <div style={{gridColumn:"1/-1"}}>{lbl("備考")}{inp("notes")}</div>
                 </div>
@@ -1671,7 +1709,34 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                   <div>{lbl("数量")}{inp("quantity","number")}</div>
                   <div>{lbl("日付")}{inp("date","date")}</div>
                   {form.type==="in"&&<>
-                    <div>{lbl("仕入先")}{inp("inSupplier","text","例：〇〇商事")}</div>
+                    <div>
+                    {lbl("仕入先")}
+                    <input value={clientSearchTx} onChange={e=>setClientSearchTx(e.target.value)}
+                      placeholder="取引先名で検索…"
+                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none",marginBottom:4}}/>
+                    {clientSearchTx&&(()=>{
+                      const filtered=(data.clients||[]).filter(c=>c.name.includes(clientSearchTx)||c.code.includes(clientSearchTx));
+                      return filtered.length>0?(
+                        <div style={{border:"1px solid #e2e8f0",borderRadius:8,background:"#fff",maxHeight:140,overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,0.1)",marginBottom:4}}>
+                          {filtered.map(c=>(
+                            <div key={c.code} onClick={()=>{setForm(p=>({...p,inSupplier:c.name}));setClientSearchTx("");}}
+                              style={{padding:"7px 12px",cursor:"pointer",borderBottom:"1px solid #f1f5f9",fontSize:13}}
+                              onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"}
+                              onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                              <span style={{fontWeight:600}}>{c.name}</span>
+                              <span style={{fontSize:11,color:"#94a3b8",marginLeft:8}}>{c.code}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ):null;
+                    })()}
+                    {form.inSupplier&&!clientSearchTx&&(
+                      <div style={{fontSize:12,color:"#0369a1",padding:"4px 8px",background:"#f0f9ff",borderRadius:5,border:"1px solid #bae6fd",display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontWeight:600}}>{form.inSupplier}</span>
+                        <button onClick={()=>setForm(p=>({...p,inSupplier:""}))} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:12,padding:0,marginLeft:"auto"}}>✕</button>
+                      </div>
+                    )}
+                  </div>
                     <div>
                       {lbl("仕入単価（円）")}
                       {inp("inUnitPrice","number","例：500")}
@@ -1705,14 +1770,29 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                 <div style={{color:"#64748b",fontSize:13,marginBottom:14}}>{form._saleName}</div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:11,marginBottom:14}}>
                   <div style={{gridColumn:"1/-1"}}>
-                    {lbl("取引先選択（またはそのまま入力）")}
-                    {(data.clients||[]).length>0&&(
-                      <select onChange={e=>{const c=(data.clients||[]).find(x=>x.code===e.target.value);if(c)selectClient(c);}} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 10px",fontSize:13,background:"#fff",cursor:"pointer",marginBottom:6}}>
-                        <option value="">-- 取引先から選択 --</option>
-                        {(data.clients||[]).map(c=><option key={c.code} value={c.code}>{c.name}（{c.code}）</option>)}
-                      </select>
-                    )}
-                    <input value={form.customer||""} onChange={e=>setForm(p=>({...p,customer:e.target.value}))} placeholder="顧客名" style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
+                    {lbl("取引先（あいまい検索 または 直接入力）")}
+                    <input value={clientSearchSale} onChange={e=>setClientSearchSale(e.target.value)}
+                      placeholder="取引先名・コードで検索…"
+                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none",marginBottom:4}}/>
+                    {clientSearchSale&&(()=>{
+                      const filtered=(data.clients||[]).filter(c=>c.name.includes(clientSearchSale)||c.code.includes(clientSearchSale));
+                      return filtered.length>0?(
+                        <div style={{border:"1px solid #e2e8f0",borderRadius:8,background:"#fff",maxHeight:160,overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,0.1)",marginBottom:6}}>
+                          {filtered.map(c=>(
+                            <div key={c.code} onClick={()=>{selectClient(c);setClientSearchSale("");}}
+                              style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #f1f5f9",fontSize:13}}
+                              onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"}
+                              onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                              <span style={{fontWeight:600}}>{c.name}</span>
+                              <span style={{fontSize:11,color:"#94a3b8",marginLeft:8}}>{c.code}</span>
+                              {c.address&&<span style={{fontSize:11,color:"#64748b",marginLeft:8}}>{c.address}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      ):null;
+                    })()}
+                    <input value={form.customer||""} onChange={e=>setForm(p=>({...p,customer:e.target.value}))} placeholder="顧客名（直接入力も可）"
+                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/>
                   </div>
                   <div>{lbl("販売台数")}{inp("saleQty","number")}</div>
                   <div>{lbl("販売日")}{inp("saleDate","date")}</div>
@@ -1920,7 +2000,7 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                 <h2 style={{fontSize:17,fontWeight:800,marginBottom:12}}>取引先を編集</h2>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14}}>
                   <div style={{gridColumn:"1/-1"}}><label style={{display:"block",fontSize:11,fontWeight:700,color:"#64748b",marginBottom:3}}>登録コード（変更不可）</label><input readOnly value={form._cc||""} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,background:"#f8fafc",fontFamily:"monospace",fontWeight:700}}/></div>
-                  <div style={{gridColumn:"1/-1"}}>{lbl("取引先名")}<input value={form._cn||""} onChange={e=>setForm(p=>({...p,_cn:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
+                  <div style={{gridColumn:"1/-1"}}>{lbl("取引先／仕入先名")}<input value={form._cn||""} onChange={e=>setForm(p=>({...p,_cn:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("郵便番号")}<input value={form._cz||""} onChange={e=>setForm(p=>({...p,_cz:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
                   <div>{lbl("電話番号")}<input value={form._ct||""} onChange={e=>setForm(p=>({...p,_ct:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
                   <div style={{gridColumn:"1/-1"}}>{lbl("住所")}<input value={form._ca||""} onChange={e=>setForm(p=>({...p,_ca:e.target.value}))} style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none"}}/></div>
