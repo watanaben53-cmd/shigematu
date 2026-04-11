@@ -50,18 +50,26 @@ input,select,textarea,button{font-family:inherit;}
 <body>
 <div id="root"></div>
 <script>
-// Firebase設定
-const firebaseConfig = {
-  apiKey: "AIzaSyB7kKTCI9e1w2wpKg9TMJp3fKqnYEUiKHA",
-  authDomain: "shigematu-kanri.firebaseapp.com",
-  projectId: "shigematu-kanri",
-  storageBucket: "shigematu-kanri.firebasestorage.app",
-  messagingSenderId: "928986828773",
-  appId: "1:928986828773:web:4fa29264d7adaaebe9690c"
-};
-firebase.initializeApp(firebaseConfig);
-const db = firebase.firestore();
-
+// Firebase設定：localStorageから動的に読み込み
+window.db = null;
+(function(){
+  try{
+    const saved = localStorage.getItem("fb_config");
+    if(saved){
+      const cfg = JSON.parse(saved);
+      if(cfg.apiKey && cfg.projectId){
+        firebase.initializeApp(cfg);
+        window.db = firebase.firestore();
+        console.log("Firebase initialized OK:", cfg.projectId);
+      }
+    }
+  }catch(e){console.log("Firebase init error:", e);}
+})();
+// 古いService Workerを削除
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.getRegistrations().then(r=>r.forEach(s=>s.unregister()));
+  caches.keys().then(n=>n.forEach(k=>caches.delete(k)));
+}
 const _cw=console.warn;
 console.warn=function(){if(arguments[0]&&String(arguments[0]).indexOf('Babel')>=0)return;_cw.apply(console,arguments);};
 </script>
@@ -203,7 +211,7 @@ function App(){
   useEffect(()=>{
     const timer=setTimeout(()=>{
       try{
-        db.collection("inventory").doc("main").set({
+        window.db.collection("inventory").doc("main").set({
           data:JSON.stringify(data),
           updatedAt:new Date().toISOString()
         }).catch(e=>console.log("Firestore save error:",e));
@@ -214,7 +222,7 @@ function App(){
 
   // Firestore同期：起動時にクラウドデータを取得
   useEffect(()=>{
-    const unsub=db.collection("inventory").doc("main").onSnapshot(doc=>{
+    const unsub=window.db.collection("inventory").doc("main").onSnapshot(doc=>{
       if(doc.exists){
         try{
           const cloudData=JSON.parse(doc.data().data);
@@ -782,11 +790,17 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
               </button>
             ))}
           </nav>
-          {sidebar&&<div style={{padding:"10px 14px",fontSize:11,color:"#475569",borderTop:"1px solid #334155"}}>
-            <div>全{data.items.length}品目 / {data.items.reduce((s,i)=>s+i.quantity,0)}在庫</div>
-            <div style={{marginTop:4,display:"flex",alignItems:"center",gap:4}}>
-              <span style={{width:7,height:7,borderRadius:"50%",background:"#10b981",display:"inline-block",flexShrink:0}}></span>
-              <span style={{fontSize:10,color:"#10b981"}}>クラウド同期中</span>
+          {sidebar&&<div style={{padding:"10px 14px",borderTop:"1px solid #334155"}}>
+            <div style={{fontSize:11,color:"#475569",marginBottom:6}}>全{data.items.length}品目 / {data.items.reduce((s,i)=>s+i.quantity,0)}在庫</div>
+            <div style={{display:"flex",alignItems:"center",gap:5,padding:"4px 8px",borderRadius:6,
+              background:syncStatus==="saved"?"rgba(16,185,129,0.15)":syncStatus==="recv"?"rgba(59,130,246,0.15)":syncStatus==="error"?"rgba(239,68,68,0.15)":"transparent"}}>
+              <span style={{width:7,height:7,borderRadius:"50%",flexShrink:0,
+                background:!window.db?"#94a3b8":syncStatus==="saved"?"#10b981":syncStatus==="recv"?"#3b82f6":syncStatus==="error"?"#ef4444":"#10b981",
+                display:"inline-block"}}></span>
+              <span style={{fontSize:10,fontWeight:600,
+                color:!window.db?"#94a3b8":syncStatus==="saved"?"#10b981":syncStatus==="recv"?"#3b82f6":syncStatus==="error"?"#ef4444":"#10b981"}}>
+                {!window.db?"Firebase未設定":syncStatus==="saved"?"✓ 保存完了":syncStatus==="recv"?"↓ 受信":syncStatus==="error"?"✗ エラー":"同期中"}
+              </span>
             </div>
           </div>}
         </aside>
