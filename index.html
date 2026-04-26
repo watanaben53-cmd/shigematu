@@ -1722,32 +1722,46 @@ td[style*="background:#fffbeb"]{background:#fffbeb!important;}
                   <div>{lbl("最低在庫数")}{inp("minQuantity","number")}</div>
                   <div>{lbl("単位")}{inp("unit")}</div>
                   <div>{lbl("単価（円）")}{inp("unitPrice","number")}</div>
-                  <div style={{gridColumn:"1/-1"}}>
+                  <div style={{gridColumn:"1/-1",position:"relative"}}>
                     {lbl("仕入先")}
                     <input value={clientSearchItem} onChange={e=>setClientSearchItem(e.target.value)}
-                      placeholder="取引先名で検索（あいまい検索）"
-                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none",marginBottom:4}}/>
+                      placeholder="取引先名 または 登録コードで検索…"
+                      style={{width:"100%",border:"1px solid #e2e8f0",borderRadius:8,padding:"7px 11px",fontSize:13,outline:"none",marginBottom:form.supplier&&!clientSearchItem?4:0}}/>
                     {clientSearchItem&&(()=>{
-                      const filtered=(data.clients||[]).filter(c=>c.name.includes(clientSearchItem)||c.code.includes(clientSearchItem));
+                      const filtered=(data.clients||[]).filter(c=>
+                        c.name.includes(clientSearchItem)||c.code.includes(clientSearchItem)
+                      );
                       return filtered.length>0?(
-                        <div style={{border:"1px solid #e2e8f0",borderRadius:8,background:"#fff",maxHeight:160,overflowY:"auto",boxShadow:"0 4px 12px rgba(0,0,0,0.1)"}}>
+                        <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:999,
+                          border:"1px solid #bae6fd",borderRadius:8,background:"#fff",
+                          maxHeight:200,overflowY:"auto",boxShadow:"0 8px 24px rgba(0,0,0,0.15)",marginTop:2}}>
+                          <div style={{padding:"4px 10px",fontSize:10,fontWeight:700,color:"#0369a1",background:"#f0f9ff",borderBottom:"1px solid #bae6fd"}}>
+                            {filtered.length}件見つかりました
+                          </div>
                           {filtered.map(c=>(
-                            <div key={c.code} onClick={()=>{setForm(p=>({...p,supplier:c.name}));setClientSearchItem("");}}
-                              style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #f1f5f9",fontSize:13}}
-                              onMouseEnter={e=>e.target.style.background="#f0f9ff"}
-                              onMouseLeave={e=>e.target.style.background="transparent"}>
-                              <span style={{fontWeight:600}}>{c.name}</span>
-                              <span style={{fontSize:11,color:"#94a3b8",marginLeft:8}}>{c.code}</span>
-                              {c.tel&&<span style={{fontSize:11,color:"#64748b",marginLeft:8}}>{c.tel}</span>}
+                            <div key={c.code}
+                              onClick={()=>{setForm(p=>({...p,supplier:c.name}));setClientSearchItem("");}}
+                              style={{padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #f1f5f9",fontSize:13,display:"flex",alignItems:"center",gap:8}}
+                              onMouseEnter={e=>e.currentTarget.style.background="#f0f9ff"}
+                              onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                              <span style={{fontFamily:"monospace",fontSize:11,color:"#3b82f6",fontWeight:700,flexShrink:0}}>{c.code}</span>
+                              <span style={{fontWeight:600,flex:1}}>{c.name}</span>
+                              {c.tel&&<span style={{fontSize:11,color:"#94a3b8",flexShrink:0}}>{c.tel}</span>}
                             </div>
                           ))}
                         </div>
-                      ):null;
+                      ):(
+                        <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:999,
+                          border:"1px solid #e2e8f0",borderRadius:8,background:"#fff",
+                          padding:"10px 12px",fontSize:12,color:"#94a3b8",boxShadow:"0 4px 12px rgba(0,0,0,0.1)",marginTop:2}}>
+                          該当する取引先が見つかりません
+                        </div>
+                      );
                     })()}
                     {form.supplier&&!clientSearchItem&&(
-                      <div style={{display:"flex",alignItems:"center",gap:6,padding:"5px 10px",background:"#f0f9ff",borderRadius:6,border:"1px solid #bae6fd",fontSize:12}}>
-                        <span style={{fontWeight:600,color:"#0369a1"}}>{form.supplier}</span>
-                        <button onClick={()=>{setForm(p=>({...p,supplier:""}));}} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:12,padding:0,marginLeft:"auto"}}>✕</button>
+                      <div style={{display:"flex",alignItems:"center",gap:6,padding:"5px 10px",background:"#f0f9ff",borderRadius:6,border:"1px solid #bae6fd",fontSize:12,marginTop:4}}>
+                        <span style={{fontWeight:600,color:"#0369a1",flex:1}}>{form.supplier}</span>
+                        <button onClick={()=>{setForm(p=>({...p,supplier:""}));}} style={{background:"none",border:"none",color:"#94a3b8",cursor:"pointer",fontSize:14,padding:0,lineHeight:1}}>✕</button>
                       </div>
                     )}
                   </div>
